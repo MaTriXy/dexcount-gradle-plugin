@@ -14,8 +14,12 @@
  * limitations under the License.
  */
 
-package com.android.dexdeps;
+package com.getkeepsafe.dexcount
 
-public interface HasDeclaringClass {
-    String getDeclClassName();
+class PrintOptions {
+    def includeClasses = false
+    def includeMethodCount = true
+    def includeFieldCount = false
+    def printHeader = false
+    def orderByMethodCount = false
 }

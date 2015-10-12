@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2015 KeepSafe Software
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,22 +17,20 @@
 package com.getkeepsafe.dexcount
 
 import com.android.build.gradle.api.BaseVariantOutput
-import com.android.dexdeps.DexData
-import com.android.dexdeps.FieldRef
 import com.android.dexdeps.HasDeclaringClass
-import com.android.dexdeps.MethodRef
 import com.android.dexdeps.Output
+import groovy.transform.stc.ClosureParams
+import groovy.transform.stc.SimpleType
 import org.gradle.api.DefaultTask
 import org.gradle.api.logging.LogLevel
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 import org.gradle.logging.StyledTextOutput
 import org.gradle.logging.StyledTextOutputFactory
 
-import java.util.zip.ZipException
-import java.util.zip.ZipFile
-
 class DexMethodCountTask extends DefaultTask {
+    @Input
     def BaseVariantOutput apkOrDex
 
     @OutputFile
@@ -55,58 +55,42 @@ class DexMethodCountTask extends DefaultTask {
             }
         }
 
-        String color
-        if (methodCount > 60000) {
-            color = 'RED'
-        } else if (methodCount > 40000) {
-            color = 'YELLOW'
-        } else {
-            color = 'GREEN'
-        }
-
         def filename = apkOrDex.outputFile.name
-        withColor(StyledTextOutput.Style.Info, color) { out ->
+        withStyledOutput(StyledTextOutput.Style.Info) { out ->
             out.println("Total methods in ${filename}: ${methodCount}")
             out.println("Total fields in ${filename}:  ${fieldCount}")
         }
 
         // Log the entire package list/tree at LogLevel.DEBUG, unless
         // verbose is enabled (in which case use the default log level).
-        def outputFactory = services.get(StyledTextOutputFactory)
-        def output = config.verbose ? outputFactory.create('dexcount') : outputFactory.create('dexcount', LogLevel.DEBUG)
-        print(tree, output.withStyle(StyledTextOutput.Style.Info))
+        def level = config.verbose ? null : LogLevel.DEBUG
+
+        withStyledOutput(StyledTextOutput.Style.Info, level) { out ->
+            print(tree, out)
+        }
     }
 
     def print(tree, writer) {
+        def opts = getPrintOptions()
         if (config.printAsTree) {
-            tree.printTree(writer, config.includeClasses)
+            tree.printTree(writer, opts)
         } else {
-            tree.printPackageList(writer, config.includeClasses)
+            tree.printPackageList(writer, opts)
         }
     }
 
-    private void withColor(StyledTextOutput.Style style, String color, Closure<StyledTextOutput> closure) {
-        def prop = "org.gradle.color.${style.name().toLowerCase()}"
-        def oldValue = System.getProperty(prop)
+    private void withStyledOutput(
+            StyledTextOutput.Style style,
+            LogLevel level = null,
+            @ClosureParams(value = SimpleType, options = ['org.gradle.logging.StyledTextOutput']) Closure closure) {
+        def factory = services.get(StyledTextOutputFactory)
+        def output = level == null ? factory.create('dexcount') : factory.create('dexcount', level)
 
-        System.setProperty(prop, color)
-        try {
-            def sto = services.get(StyledTextOutputFactory)
-                    .create("dexcount")
-                    .withStyle(style)
-
-            closure(sto)
-        } finally {
-            if (oldValue != null) {
-                System.setProperty(prop, oldValue)
-            } else {
-                System.clearProperty(prop)
-            }
-        }
+        closure(output.withStyle(style))
     }
 
     def getPackageTree() {
-        def dataList = extractDexData(apkOrDex.outputFile)
+        def dataList = DexFile.extractDexData(apkOrDex.outputFile)
         try {
             def tree = new PackageTree()
             refListToClassNames(dataList*.getMethodRefs()).each {
@@ -126,70 +110,24 @@ class DexMethodCountTask extends DefaultTask {
     static refListToClassNames(List<List<HasDeclaringClass>> refs) {
         return refs.flatten().collect { ref ->
             def descriptor = ref.getDeclClassName()
-            return Output.descriptorToDot(descriptor)
-        }
-    }
-
-    static List<DexFile> extractDexData(File file) {
-        try {
-            return extractDexFromZip(file)
-        } catch (ZipException ignored) {
-            // not a zip, no problem
-        }
-
-        return [new DexFile(file, false)]
-    }
-
-    static List<DexFile> extractDexFromZip(File file) {
-        def zipfile = new ZipFile(file)
-        def entries = Collections.list(zipfile.entries())
-        def dexEntries = entries.findAll { it.name.matches("classes.*\\.dex") }
-        return dexEntries.collect { entry ->
-            def temp = File.createTempFile("dexcount", ".dex")
-            temp.deleteOnExit()
-
-            def buf = new byte[4096]
-            zipfile.getInputStream(entry).withStream { input ->
-                temp.withOutputStream { output ->
-                    def read
-                    while ((read = input.read(buf)) != -1) {
-                        output.write(buf, 0, read)
-                    }
-                    output.flush()
-                }
+            def dot = Output.descriptorToDot(descriptor)
+            if (dot.indexOf('.') == -1) {
+                // Classes in the unnamed package (e.g. primitive arrays)
+                // will not appear in the output in the current PackageTree
+                // implementation if classes are not included.  To work around,
+                // we make an artificial package named "<unnamed>".
+                dot = "<unnamed>." + dot
             }
-
-            return new DexFile(temp, true)
+            return dot
         }
     }
 
-    static class DexFile {
-        public DexData data
-        private RandomAccessFile raf
-        private File file
-        private boolean isTemp
-
-        public DexFile(File file, boolean isTemp) {
-            this.file = file
-            this.isTemp = isTemp
-            this.raf = new RandomAccessFile(file, 'r')
-            this.data = new DexData(raf)
-            data.load()
-        }
-
-        def List<MethodRef> getMethodRefs() {
-            return data.getMethodRefs()
-        }
-
-        def List<FieldRef> getFieldRefs() {
-            return data.getFieldRefs()
-        }
-
-        void dispose() {
-            raf.close()
-            if (isTemp) {
-                file.delete()
-            }
-        }
+    private def getPrintOptions() {
+        return new PrintOptions(
+            includeMethodCount: true,
+            includeFieldCount: config.includeFieldCount,
+            orderByMethodCount: config.orderByMethodCount,
+            includeClasses: config.includeClasses,
+            printHeader: true)
     }
 }

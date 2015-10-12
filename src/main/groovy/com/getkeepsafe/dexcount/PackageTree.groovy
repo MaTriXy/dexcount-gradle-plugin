@@ -1,5 +1,24 @@
+/*
+ * Copyright (C) 2015 KeepSafe Software
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.getkeepsafe.dexcount
 
+import groovy.transform.CompileStatic
+
+@CompileStatic  // necessary to avoid JDK verifier bugs (issues #11 and #12)
 class PackageTree {
     // A cached sum of this node and all children's method ref counts.
     // -1 means that there is no cached value.  Set by `getMethodCount()`, and
@@ -23,24 +42,31 @@ class PackageTree {
     private final SortedMap<String, PackageTree> children_ = new TreeMap<>()
 
     PackageTree() {
-        this.name_ = ""
-        this.isClass_ = false
+        this("", false)
     }
 
-    private PackageTree(name) {
+    PackageTree(String name) {
+        this(name, isClassName(name))
+    }
+
+    private PackageTree(name, isClass) {
         this.name_ = name
-        this.isClass_ = name.charAt(0).isUpperCase()
+        this.isClass_ = isClass
     }
 
-    public def addMethodRef(String fullyQualifiedClassName) {
+    private static boolean isClassName(String name) {
+        return Character.isUpperCase(name.charAt(0)) || name.contains("[]")
+    }
+
+    public void addMethodRef(String fullyQualifiedClassName) {
         addInternal(fullyQualifiedClassName, 0, true)
     }
 
-    public def addFieldRef(String fullyQualifiedClassName) {
+    public void addFieldRef(String fullyQualifiedClassName) {
         addInternal(fullyQualifiedClassName, 0, false)
     }
 
-    private def addInternal(String name, int startIndex, boolean isMethod) {
+    private void addInternal(String name, int startIndex, boolean isMethod) {
         def ix = name.indexOf('.', startIndex)
         def segment = ix == -1 ? name.substring(startIndex) : name.substring(startIndex, ix)
         def child = children_[segment]
@@ -64,60 +90,120 @@ class PackageTree {
         }
     }
 
-    def getMethodCount() {
+    int getMethodCount() {
         if (methodTotal_ == -1) {
-            methodTotal_ = children_.values().inject(methodCount_) { sum, child -> sum + child.getMethodCount() }
+            methodTotal_ = (int) children_.values().inject(methodCount_) {
+                int sum, PackageTree child -> sum + child.getMethodCount() }
         }
         return methodTotal_
     }
 
-    def getFieldCount() {
+    int getFieldCount() {
         if (fieldTotal_ == -1) {
-            fieldTotal_ = children_.values().inject(fieldCount_) { sum, child -> sum + child.getFieldCount() }
+            fieldTotal_ = (int) children_.values().inject(fieldCount_) {
+                int sum, PackageTree child -> sum + child.getFieldCount() }
         }
         return fieldTotal_
     }
 
-    def printPackageListWithoutClasses(Appendable out) {
-        printPackageList(out, false)
-    }
-
-    def printPackageListWithClasses(Appendable out) {
-        printPackageList(out, true)
-    }
-
-    def printPackageList(Appendable out, boolean printClasses) {
+    void printPackageList(Appendable out, PrintOptions opts) {
         def sb = new StringBuilder(64)
-        children_.values().each { it -> it.printPackageListRecursively(out, sb, printClasses) }
+
+        if (opts.printHeader) {
+            printPackageListHeader(out, opts)
+        }
+
+        getChildren(opts).each { it -> it.printPackageListRecursively(out, sb, opts) }
     }
 
-    private def printPackageListRecursively(Appendable out, StringBuilder sb, boolean includeClasses) {
+    private static def printPackageListHeader(Appendable out, PrintOptions opts) {
+        if (opts.includeMethodCount) {
+            out.append(String.format("%-8s ", "methods"))
+        }
+
+        if (opts.includeFieldCount) {
+            out.append(String.format("%-8s ", "fields"))
+        }
+
+        out.append("package/class name\n")
+    }
+
+    private void printPackageListRecursively(Appendable out, StringBuilder sb, PrintOptions opts) {
         def len = sb.length()
         if (len > 0) {
             sb.append(".")
         }
         sb.append(name_)
 
-        if (!isClass_ || includeClasses) {
-            out.append(String.format("%-8d %s\n", getMethodCount(), sb.toString()))
+        if (!isClass_ || opts.includeClasses) {
+            if (opts.includeMethodCount) {
+                out.append(String.format("%-8d ", getMethodCount()))
+            }
+
+            if (opts.includeFieldCount) {
+                out.append(String.format("%-8d ", getFieldCount()))
+            }
+
+            out.append(sb.toString())
+            out.append('\n')
         }
 
-        children_.values().each { it -> it.printPackageListRecursively(out, sb, includeClasses) }
+        getChildren(opts).each { PackageTree it -> it.printPackageListRecursively(out, sb, opts) }
         sb.setLength(len)
     }
 
-    def printTree(Appendable out, boolean printClasses) {
-        children_.values().each { it -> it.printTreeRecursively(out, 0, printClasses) }
+    void printTree(Appendable out, PrintOptions opts) {
+        getChildren(opts).each { PackageTree it -> it.printTreeRecursively(out, 0, opts) }
     }
 
-    private def printTreeRecursively(Appendable out, int indent, boolean printClasses) {
-        if (printClasses || !isClass_) {
+    private void printTreeRecursively(Appendable out, int indent, PrintOptions opts) {
+        if (opts.includeClasses || !isClass_) {
             indent.times { out.append("  ") }
             out.append(name_)
-            out.append(" (")
-            out.append(String.valueOf(getMethodCount()))
-            out.append(")\n")
+
+            if (opts.includeFieldCount || opts.includeMethodCount) {
+                out.append(" (")
+
+                def appended = false
+                if (opts.includeMethodCount) {
+                    out.append(String.valueOf(getMethodCount()))
+                    out.append(" ")
+                    out.append(pluralizedMethods(getMethodCount()))
+                    appended = true
+                }
+
+                if (opts.includeFieldCount) {
+                    if (appended) {
+                        out.append(", ")
+                    }
+                    out.append(String.valueOf(getFieldCount()))
+                    out.append(" ")
+                    out.append(pluralizeFields(getFieldCount()))
+                }
+
+                out.append(")")
+            }
+
+            out.append("\n")
         }
-        children_.values().each { it -> it.printTreeRecursively(out, indent + 1, printClasses) }
+
+        getChildren(opts).each { PackageTree it -> it.printTreeRecursively(out, indent + 1, opts) }
+    }
+
+    private Collection<PackageTree> getChildren(PrintOptions opts) {
+        if (opts.orderByMethodCount) {
+            // Return the child nodes sorted in descending order by method count.
+            return children_.values().sort(false) { PackageTree it -> -it.getMethodCount() }
+        } else {
+            return children_.values()
+        }
+    }
+
+    private static String pluralizedMethods(int n) {
+        return n == 1 ? "method" : "methods"
+    }
+
+    private static String pluralizeFields(int n) {
+        return n == 1 ? "field" : "fields"
     }
 }
