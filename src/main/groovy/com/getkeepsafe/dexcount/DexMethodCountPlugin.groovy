@@ -42,17 +42,17 @@ class DexMethodCountPlugin implements Plugin<Project> {
                 def path = "${project.buildDir}/outputs/dexcount/${variant.name}"
                 if (variant.outputs.size() > 1) {
                     slug += output.name.capitalize()
-                    path += "/${output.name}.txt"
-                } else {
-                    path += '.txt'
+                    path += "/${output.name}"
                 }
 
                 def ext = project.extensions['dexcount']
 
                 DexMethodCountTask task = project.tasks.create("count${slug}DexMethods", DexMethodCountTask)
                 task.apkOrDex = output
-                task.outputFile = project.file(path)
-                task.config = ext
+                task.mappingFile = variant.mappingFile
+                task.outputFileTxt = project.file(path + '.txt')
+                task.outputFileCSV = project.file(path + '.csv')
+                task.config = ext as DexMethodCountExtension
                 variant.assemble.doLast { task.countMethods() }
             }
         }

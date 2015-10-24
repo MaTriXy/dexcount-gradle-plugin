@@ -16,6 +16,7 @@
 
 package com.getkeepsafe.dexcount
 
+import com.android.annotations.Nullable
 import com.android.build.gradle.api.BaseVariantOutput
 import com.android.dexdeps.HasDeclaringClass
 import com.android.dexdeps.Output
@@ -33,8 +34,14 @@ class DexMethodCountTask extends DefaultTask {
     @Input
     def BaseVariantOutput apkOrDex
 
+    @Nullable
+    def File mappingFile
+
     @OutputFile
-    def File outputFile
+    def File outputFileTxt
+
+    @OutputFile
+    def File outputFileCSV
 
     def DexMethodCountExtension config
 
@@ -44,10 +51,10 @@ class DexMethodCountTask extends DefaultTask {
         def methodCount = tree.getMethodCount()
         def fieldCount = tree.getFieldCount()
 
-        if (outputFile != null) {
-            outputFile.parentFile.mkdirs()
-            outputFile.createNewFile()
-            outputFile.withOutputStream { stream ->
+        if (outputFileTxt != null) {
+            outputFileTxt.parentFile.mkdirs()
+            outputFileTxt.createNewFile()
+            outputFileTxt.withOutputStream { stream ->
                 def appendableStream = new PrintStream(stream)
                 print(tree, appendableStream)
                 appendableStream.flush()
@@ -67,6 +74,20 @@ class DexMethodCountTask extends DefaultTask {
 
         withStyledOutput(StyledTextOutput.Style.Info, level) { out ->
             print(tree, out)
+        }
+
+        if (config.exportAsCSV && outputFileCSV != null) {
+            outputFileCSV.parentFile.mkdirs()
+            outputFileCSV.createNewFile()
+
+            final String headers = config.includeFieldCount ? "methods,fields" : "methods";
+            final String counts = config.includeFieldCount ? "${methodCount},${fieldCount}" : "${methodCount}";
+
+            outputFileCSV.withOutputStream { stream ->
+                def appendableStream = new PrintStream(stream)
+                appendableStream.println(headers)
+                appendableStream.println(counts);
+            }
         }
     }
 
@@ -90,14 +111,18 @@ class DexMethodCountTask extends DefaultTask {
     }
 
     def getPackageTree() {
+        // Create a de-obfuscator based on the current Proguard mapping file.
+        // If none is given, we'll get a default mapping.
+        def deobs = getDeobfuscator()
+
         def dataList = DexFile.extractDexData(apkOrDex.outputFile)
         try {
             def tree = new PackageTree()
-            refListToClassNames(dataList*.getMethodRefs()).each {
+            refListToClassNames(dataList*.getMethodRefs(), deobs).each {
                 tree.addMethodRef(it)
             }
 
-            refListToClassNames(dataList*.getFieldRefs()).each {
+            refListToClassNames(dataList*.getFieldRefs(), deobs).each {
                 tree.addFieldRef(it)
             }
 
@@ -107,10 +132,11 @@ class DexMethodCountTask extends DefaultTask {
         }
     }
 
-    static refListToClassNames(List<List<HasDeclaringClass>> refs) {
+    static refListToClassNames(List<List<HasDeclaringClass>> refs, Deobfuscator deobfuscator) {
         return refs.flatten().collect { ref ->
             def descriptor = ref.getDeclClassName()
             def dot = Output.descriptorToDot(descriptor)
+            dot = deobfuscator.deobfuscate(dot)
             if (dot.indexOf('.') == -1) {
                 // Classes in the unnamed package (e.g. primitive arrays)
                 // will not appear in the output in the current PackageTree
@@ -124,10 +150,20 @@ class DexMethodCountTask extends DefaultTask {
 
     private def getPrintOptions() {
         return new PrintOptions(
-            includeMethodCount: true,
-            includeFieldCount: config.includeFieldCount,
-            orderByMethodCount: config.orderByMethodCount,
-            includeClasses: config.includeClasses,
-            printHeader: true)
+                includeMethodCount: true,
+                includeFieldCount: config.includeFieldCount,
+                orderByMethodCount: config.orderByMethodCount,
+                includeClasses: config.includeClasses,
+                printHeader: true)
+    }
+
+    private def getDeobfuscator() {
+        if (mappingFile != null && !mappingFile.exists()) {
+            withStyledOutput(StyledTextOutput.Style.Error, LogLevel.WARN) {
+                it.println("Mapping file specified at ${mappingFile.absolutePath} does not exist, output will be obfuscated")
+            }
+        }
+
+        return Deobfuscator.create(mappingFile)
     }
 }
