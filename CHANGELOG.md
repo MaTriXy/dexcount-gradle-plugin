@@ -1,10 +1,38 @@
-0.2.2 (Unreleased)
+0.4.2 (released 16 February 2016)
+---------
+
+* Add percentage-used for method and field counts to Gradle output
+
+0.4.1 (released 29 January 2016)
 ----------
 
+* Change output-file extensions to '.json' and '.yml' for JSON and YAML outputs.
+* Revert pull request #32 and remove `@Input` from `apkOrDex` (issues #40 and #46)
+
+0.4.0 (released 23 January 2016)
+----------
+
+* BUG: Fix incorrect indentation on field-count-only YAML output
+* Add YAML as a format option
+* Add JSON as a format option
+* Replace `printAsTree` with `format` and associated enum
+
+0.3.1 (released 5 December 2015)
+----------
+
+* Report number of methods/fields remaining in console output
+* Add description and group to Gradle tasks
+* Add `includeTotalMethodCount` config option to print total count in the PackageTree output
+
+0.3.0 (released 27 October 2015)
+----------
+
+* Remove `exportAsCSV` and just print the file unconditionally
+* CHANGED: field counts are enabled by default
 * Use Proguard mappings to de-obfuscate class and package names
 * Add `exportAsCSV` option to support Jenkins Plot Plugin
 
-0.2.1 (release 11 September 2015)
+0.2.1 (released 11 September 2015)
 ----------
 
 * BUG: Fix invalid bytecode (issue #11)

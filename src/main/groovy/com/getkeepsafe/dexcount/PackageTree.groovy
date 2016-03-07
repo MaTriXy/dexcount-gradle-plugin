@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,10 @@
 
 package com.getkeepsafe.dexcount
 
+import com.google.gson.stream.JsonWriter
 import groovy.transform.CompileStatic
+
+import java.nio.CharBuffer
 
 @CompileStatic  // necessary to avoid JDK verifier bugs (issues #11 and #12)
 class PackageTree {
@@ -106,8 +109,35 @@ class PackageTree {
         return fieldTotal_
     }
 
+    void print(Appendable out, OutputFormat format, PrintOptions opts) {
+        switch (format) {
+            case OutputFormat.LIST:
+                printPackageList(out, opts)
+                break;
+
+            case OutputFormat.TREE:
+                printTree(out, opts)
+                break;
+
+            case OutputFormat.JSON:
+                printJson(out, opts)
+                break;
+
+            case OutputFormat.YAML:
+                printYaml(out, opts)
+                break;
+
+            default:
+                throw new IllegalArgumentException("Unknown format: $format")
+        }
+    }
+
     void printPackageList(Appendable out, PrintOptions opts) {
         def sb = new StringBuilder(64)
+
+        if (opts.includeTotalMethodCount) {
+            out.append("Total methods: ${this.getMethodCount()}\n")
+        }
 
         if (opts.printHeader) {
             printPackageListHeader(out, opts)
@@ -135,7 +165,7 @@ class PackageTree {
         }
         sb.append(name_)
 
-        if (!isClass_ || opts.includeClasses) {
+        if (isPrintable(opts)) {
             if (opts.includeMethodCount) {
                 out.append(String.format("%-8d ", getMethodCount()))
             }
@@ -157,46 +187,148 @@ class PackageTree {
     }
 
     private void printTreeRecursively(Appendable out, int indent, PrintOptions opts) {
-        if (opts.includeClasses || !isClass_) {
-            indent.times { out.append("  ") }
-            out.append(name_)
+        indent.times { out.append("  ") }
+        out.append(name_)
 
-            if (opts.includeFieldCount || opts.includeMethodCount) {
-                out.append(" (")
+        if (opts.includeFieldCount || opts.includeMethodCount) {
+            out.append(" (")
 
-                def appended = false
-                if (opts.includeMethodCount) {
-                    out.append(String.valueOf(getMethodCount()))
-                    out.append(" ")
-                    out.append(pluralizedMethods(getMethodCount()))
-                    appended = true
-                }
-
-                if (opts.includeFieldCount) {
-                    if (appended) {
-                        out.append(", ")
-                    }
-                    out.append(String.valueOf(getFieldCount()))
-                    out.append(" ")
-                    out.append(pluralizeFields(getFieldCount()))
-                }
-
-                out.append(")")
+            def appended = false
+            if (opts.includeMethodCount) {
+                out.append(String.valueOf(getMethodCount()))
+                out.append(" ")
+                out.append(pluralizedMethods(getMethodCount()))
+                appended = true
             }
 
-            out.append("\n")
+            if (opts.includeFieldCount) {
+                if (appended) {
+                    out.append(", ")
+                }
+                out.append(String.valueOf(getFieldCount()))
+                out.append(" ")
+                out.append(pluralizeFields(getFieldCount()))
+            }
+
+            out.append(")")
         }
+
+        out.append("\n")
 
         getChildren(opts).each { PackageTree it -> it.printTreeRecursively(out, indent + 1, opts) }
     }
 
+    void printJson(Appendable out, PrintOptions opts) {
+        def json = new JsonWriter(new Writer() {
+            @Override
+            void write(char[] cbuf, int off, int len) throws IOException {
+                CharSequence seq = CharBuffer.wrap(cbuf, off, len)
+                out.append(seq)
+            }
+
+            @Override
+            void flush() throws IOException {
+
+            }
+
+            @Override
+            void close() throws IOException {
+
+            }
+        })
+
+        // Setting an indentation enables pretty-printing
+        json.indent = "  "
+
+        printJsonRecursively(json, opts)
+    }
+
+    private void printJsonRecursively(JsonWriter json, PrintOptions opts) {
+        json.beginObject()
+
+        json.name("name").value(name_)
+
+        if (opts.includeMethodCount) {
+            json.name("methods").value(methodCount)
+        }
+
+        if (opts.includeFieldCount) {
+            json.name("fields").value(fieldCount)
+        }
+
+        json.name("children")
+        json.beginArray()
+
+        getChildren(opts).each { PackageTree it -> it.printJsonRecursively(json, opts) }
+
+        json.endArray()
+
+        json.endObject()
+    }
+
+    void printYaml(Appendable out, PrintOptions opts) {
+        out.append("---\n")
+
+        if (opts.includeMethodCount) {
+            out.append("methods: " + methodCount + "\n")
+        }
+
+        if (opts.includeFieldCount) {
+            out.append("fields: " + fieldCount + "\n")
+        }
+
+        out.append("counts:\n")
+
+        getChildren(opts).each { it.printYamlRecursively(out, 1, opts) }
+    }
+
+    private void printYamlRecursively(Appendable out, int indent, PrintOptions opts) {
+        String indentText = "  " * indent
+
+        out.append(indentText + "- name: ")
+        out.append(name_)
+        out.append("\n")
+
+        indentText += "  "
+
+        if (opts.includeMethodCount) {
+            out.append(indentText)
+            out.append("methods: " + methodCount)
+            out.append("\n")
+        }
+
+        if (opts.includeFieldCount) {
+            out.append(indentText)
+            out.append("fields: " + fieldCount)
+            out.append("\n")
+        }
+
+        def children = getChildren(opts)
+        if (children.empty) {
+            out.append(indentText)
+            out.append("children: []\n")
+        } else {
+            out.append(indentText)
+            out.append("children:\n")
+            children.each { PackageTree child -> child.printYamlRecursively(out, indent + 2, opts) }
+        }
+    }
+
     private Collection<PackageTree> getChildren(PrintOptions opts) {
+        def printableChildren = children_.values().findAll {
+            it.isPrintable(opts)
+        }
+
         if (opts.orderByMethodCount) {
             // Return the child nodes sorted in descending order by method count.
-            return children_.values().sort(false) { PackageTree it -> -it.getMethodCount() }
-        } else {
-            return children_.values()
+            printableChildren = printableChildren.sort(false) { PackageTree it -> -it.methodCount }
         }
+
+        return printableChildren
+    }
+
+    private boolean isPrintable(PrintOptions opts) {
+        return opts.includeClasses || !isClass_
     }
 
     private static String pluralizedMethods(int n) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,66 +24,75 @@ import groovy.transform.stc.ClosureParams
 import groovy.transform.stc.SimpleType
 import org.gradle.api.DefaultTask
 import org.gradle.api.logging.LogLevel
-import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 import org.gradle.logging.StyledTextOutput
 import org.gradle.logging.StyledTextOutputFactory
 
 class DexMethodCountTask extends DefaultTask {
-    @Input
+    /**
+     * The maximum number of method refs and field refs allowed in a single Dex
+     * file.
+     */
+    private static final int MAX_DEX_REFS = 0xFFFF;
+
+    def PackageTree tree;
+
     def BaseVariantOutput apkOrDex
 
     @Nullable
     def File mappingFile
 
     @OutputFile
-    def File outputFileTxt
+    def File outputFile
 
     @OutputFile
-    def File outputFileCSV
+    def File summaryFile
 
     def DexMethodCountExtension config
 
+    def long startTime
+    def long ioTime
+    def long treegenTime
+    def long outputTime
+
     @TaskAction
     void countMethods() {
-        def tree = getPackageTree()
-        def methodCount = tree.getMethodCount()
-        def fieldCount = tree.getFieldCount()
+        generatePackageTree()
+        printSummary()
+        printFullTree()
+        printTaskDiagnosticData()
+    }
 
-        if (outputFileTxt != null) {
-            outputFileTxt.parentFile.mkdirs()
-            outputFileTxt.createNewFile()
-            outputFileTxt.withOutputStream { stream ->
-                def appendableStream = new PrintStream(stream)
-                print(tree, appendableStream)
-                appendableStream.flush()
-                appendableStream.close()
-            }
-        }
+    static def percentUsed(int count) {
+        def used = ((double) count / MAX_DEX_REFS) * 100.0
+        return sprintf("%.2f", used)
+    }
 
+    /**
+     * Prints a summary of method and field counts
+     * @return
+     */
+    def printSummary() {
         def filename = apkOrDex.outputFile.name
         withStyledOutput(StyledTextOutput.Style.Info) { out ->
-            out.println("Total methods in ${filename}: ${methodCount}")
-            out.println("Total fields in ${filename}:  ${fieldCount}")
+            def percentMethodsUsed = percentUsed(tree.methodCount)
+            def percentFieldsUsed = percentUsed(tree.fieldCount)
+
+            out.println("Total methods in ${filename}: ${tree.methodCount} ($percentMethodsUsed% used)")
+            out.println("Total fields in ${filename}:  ${tree.fieldCount} ($percentFieldsUsed% used)")
+            out.println("Methods remaining in ${filename}: ${MAX_DEX_REFS - tree.methodCount}")
+            out.println("Fields remaining in ${filename}:  ${MAX_DEX_REFS - tree.fieldCount}")
         }
 
-        // Log the entire package list/tree at LogLevel.DEBUG, unless
-        // verbose is enabled (in which case use the default log level).
-        def level = config.verbose ? null : LogLevel.DEBUG
+        if (summaryFile != null) {
+            summaryFile.parentFile.mkdirs()
+            summaryFile.createNewFile()
 
-        withStyledOutput(StyledTextOutput.Style.Info, level) { out ->
-            print(tree, out)
-        }
+            final String headers = "methods,fields";
+            final String counts = "${tree.methodCount},${tree.fieldCount}";
 
-        if (config.exportAsCSV && outputFileCSV != null) {
-            outputFileCSV.parentFile.mkdirs()
-            outputFileCSV.createNewFile()
-
-            final String headers = config.includeFieldCount ? "methods,fields" : "methods";
-            final String counts = config.includeFieldCount ? "${methodCount},${fieldCount}" : "${methodCount}";
-
-            outputFileCSV.withOutputStream { stream ->
+            summaryFile.withOutputStream { stream ->
                 def appendableStream = new PrintStream(stream)
                 appendableStream.println(headers)
                 appendableStream.println(counts);
@@ -91,13 +100,47 @@ class DexMethodCountTask extends DefaultTask {
         }
     }
 
-    def print(tree, writer) {
-        def opts = getPrintOptions()
-        if (config.printAsTree) {
-            tree.printTree(writer, opts)
-        } else {
-            tree.printPackageList(writer, opts)
+    /**
+     * Prints the package tree to the usual outputs/dexcount/variant.txt file.
+     */
+    def printFullTree() {
+        if (outputFile != null) {
+            outputFile.parentFile.mkdirs()
+            outputFile.createNewFile()
+            outputFile.withOutputStream { stream ->
+                def appendableStream = new PrintStream(stream)
+                print(tree, appendableStream)
+                appendableStream.flush()
+                appendableStream.close()
+            }
         }
+
+        outputTime = System.currentTimeMillis()
+    }
+
+    /**
+     * Logs the package tree to stdout at {@code LogLevel.DEBUG}, or at the
+     * default level if verbose-mode is configured.
+     */
+    def printTaskDiagnosticData() {
+        // Log the entire package list/tree at LogLevel.DEBUG, unless
+        // verbose is enabled (in which case use the default log level).
+        def level = config.verbose ? null : LogLevel.DEBUG
+
+        withStyledOutput(StyledTextOutput.Style.Info, level) { out ->
+            print(tree, out)
+
+            out.format("\n\nTask runtimes:\n")
+            out.format("--------------\n")
+            out.format("parsing:    ${ioTime - startTime} ms\n")
+            out.format("counting:   ${treegenTime - ioTime} ms\n")
+            out.format("printing:   ${outputTime - treegenTime} ms\n")
+            out.format("total:      ${outputTime - startTime} ms\n")
+        }
+    }
+
+    def print(PackageTree tree, Appendable writer) {
+        tree.print(writer, config.format, getPrintOptions())
     }
 
     private void withStyledOutput(
@@ -110,14 +153,23 @@ class DexMethodCountTask extends DefaultTask {
         closure(output.withStyle(style))
     }
 
-    def getPackageTree() {
+    /**
+     * Creates a new PackageTree and populates it with the method and field
+     * counts of the current dex/apk file.
+     */
+    private def generatePackageTree() {
+        startTime = System.currentTimeMillis()
+
         // Create a de-obfuscator based on the current Proguard mapping file.
         // If none is given, we'll get a default mapping.
         def deobs = getDeobfuscator()
 
         def dataList = DexFile.extractDexData(apkOrDex.outputFile)
+
+        ioTime = System.currentTimeMillis()
         try {
-            def tree = new PackageTree()
+            tree = new PackageTree()
+
             refListToClassNames(dataList*.getMethodRefs(), deobs).each {
                 tree.addMethodRef(it)
             }
@@ -125,11 +177,11 @@ class DexMethodCountTask extends DefaultTask {
             refListToClassNames(dataList*.getFieldRefs(), deobs).each {
                 tree.addFieldRef(it)
             }
-
-            return tree
         } finally {
             dataList*.dispose()
         }
+
+        treegenTime = System.currentTimeMillis()
     }
 
     static refListToClassNames(List<List<HasDeclaringClass>> refs, Deobfuscator deobfuscator) {
@@ -152,6 +204,7 @@ class DexMethodCountTask extends DefaultTask {
         return new PrintOptions(
                 includeMethodCount: true,
                 includeFieldCount: config.includeFieldCount,
+                includeTotalMethodCount: config.includeTotalMethodCount,
                 orderByMethodCount: config.orderByMethodCount,
                 includeClasses: config.includeClasses,
                 printHeader: true)
@@ -159,9 +212,10 @@ class DexMethodCountTask extends DefaultTask {
 
     private def getDeobfuscator() {
         if (mappingFile != null && !mappingFile.exists()) {
-            withStyledOutput(StyledTextOutput.Style.Error, LogLevel.WARN) {
-                it.println("Mapping file specified at ${mappingFile.absolutePath} does not exist, output will be obfuscated")
+            withStyledOutput(StyledTextOutput.Style.Normal, LogLevel.DEBUG) {
+                it.println("Mapping file specified at ${mappingFile.absolutePath} does not exist, assuming output is not obfuscated.")
             }
+            mappingFile = null
         }
 
         return Deobfuscator.create(mappingFile)

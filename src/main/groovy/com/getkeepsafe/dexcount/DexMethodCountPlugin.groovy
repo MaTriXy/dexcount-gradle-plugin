@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ class DexMethodCountPlugin implements Plugin<Project> {
         } else if (project.plugins.hasPlugin('com.android.library')) {
             applyAndroid(project, (DomainObjectCollection<BaseVariant>) project.android.libraryVariants);
         } else {
-            throw new IllegalArgumentException("Dexcount plugin requires the Android plugin to be configured");
+            throw new IllegalArgumentException('Dexcount plugin requires the Android plugin to be configured');
         }
     }
 
@@ -45,14 +45,17 @@ class DexMethodCountPlugin implements Plugin<Project> {
                     path += "/${output.name}"
                 }
 
-                def ext = project.extensions['dexcount']
+                def ext = project.extensions['dexcount'] as DexMethodCountExtension
+                def format = ext.format
 
-                DexMethodCountTask task = project.tasks.create("count${slug}DexMethods", DexMethodCountTask)
+                def task = project.tasks.create("count${slug}DexMethods", DexMethodCountTask)
+                task.description = "Outputs dex method count for ${variant.name}."
+                task.group = 'Reporting'
                 task.apkOrDex = output
                 task.mappingFile = variant.mappingFile
-                task.outputFileTxt = project.file(path + '.txt')
-                task.outputFileCSV = project.file(path + '.csv')
-                task.config = ext as DexMethodCountExtension
+                task.outputFile = project.file(path + format.extension)
+                task.summaryFile = project.file(path + '.csv')
+                task.config = ext
                 variant.assemble.doLast { task.countMethods() }
             }
         }

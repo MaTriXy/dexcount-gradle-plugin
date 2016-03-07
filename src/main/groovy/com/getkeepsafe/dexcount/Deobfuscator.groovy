@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,12 +57,12 @@ class Deobfuscator {
         }
 
         @Override
-        void processFieldMapping(String className, String fieldType, String fieldName, String newFieldName) {
+        void processMethodMapping(String className, int firstLineNumber, int lastLineNumber, String methodReturnType, String methodName, String methodArguments, String newClassName, int newFirstLineNumber, int newLastLineNumber, String newMethodName) {
             // nothing
         }
 
         @Override
-        void processMethodMapping(String className, int firstLineNumber, int lastLineNumber, String methodReturnType, String methodName, String methodArguments, String newMethodName) {
+        void processFieldMapping(String className, String fieldType, String fieldName, String newClassName, String newFieldName) {
             // nothing
         }
     }

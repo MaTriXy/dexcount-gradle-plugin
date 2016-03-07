@@ -16,11 +16,33 @@
 
 package com.getkeepsafe.dexcount
 
-class PrintOptions {
-    def includeClasses = false
-    def includeMethodCount = true
-    def includeFieldCount = false
-    def includeTotalMethodCount = false
-    def printHeader = false
-    def orderByMethodCount = false
+/**
+ * Specifies what format the task output should take.
+ */
+public enum OutputFormat {
+    /**
+     * Specifies that method counts will be printed in a flat list of packages.
+     */
+    LIST('.txt'),
+
+    /**
+     * Specifies that the output will be pretty-printed as an tree.
+     */
+    TREE('.txt'),
+
+    /**
+     * Specifies that the output will be a pretty-printed JSON object.
+     */
+    JSON('.json'),
+
+    /**
+     * Specifies that output will be a YAML document.
+     */
+    YAML('.yml');
+
+    public String extension
+
+    OutputFormat(String extension) {
+        this.extension = extension
+    }
 }

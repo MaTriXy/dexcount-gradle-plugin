@@ -14,11 +14,11 @@ in `app/build.gradle`
 ```groovy
 buildscript {
     repositories {
-        mavenCentral() // or jCenter()
+        mavenCentral() // or jcenter()
     }
 
     dependencies {
-        classpath 'com.getkeepsafe.dexcount:dexcount-gradle-plugin:0.2.1'
+        classpath 'com.getkeepsafe.dexcount:dexcount-gradle-plugin:0.4.2'
     }
 }
 
@@ -50,25 +50,19 @@ By default, a breakdown of method references by package and class will be writte
 
 For example, an excerpt from our own app (in `app/build/outputs/dexcount/debug.txt`):
 ```
-methods  package/class name
-6        android.speech
-6        android.speech.tts
-5        android.speech.tts.TextToSpeech
-1        android.speech.tts.UtteranceProgressListener
-10789    android.support
-20       android.support.annotation
-1        android.support.annotation.CheckResult
-4        android.support.annotation.FloatRange
-2        android.support.annotation.IntDef
-2        android.support.annotation.IntRange
-6        android.support.annotation.RequiresPermission
-1        android.support.annotation.RequiresPermission.Read
-1        android.support.annotation.RequiresPermission.Write
-4        android.support.annotation.Size
-1        android.support.annotation.StringDef
-7010     android.support.v4
-1        android.support.v4.BuildConfig
-41       android.support.v4.accessibilityservice
+methods  fields   package/class name
+5037     1103     android.support.v4
+29       1        android.support.v4.accessibilityservice
+57       16       android.support.v4.animation
+931      405      android.support.v4.app
+87       31       android.support.v4.content
+139      12       android.support.v4.graphics
+116      11       android.support.v4.graphics.drawable
+74       9        android.support.v4.internal
+74       9        android.support.v4.internal.view
+194      35       android.support.v4.media
+11       0        android.support.v4.media.routing
+156      26       android.support.v4.media.session
 ```
 
 ## Configuration
@@ -78,44 +72,26 @@ Dexcount is configurable via a Gradle extension (shown with default values):
 in `app/build.gradle`:
 ```groovy
 dexcount {
+    format = "list"
     includeClasses = false
-    includeFieldCount = false
-    printAsTree = false
+    includeFieldCount = true
+    includeTotalMethodCount = false
     orderByMethodCount = false
     verbose = false
-    exportAsCSV = false
 }
 ```
 
 Each flag controls some aspect of the printed output:
-- `includeClasses`: When true, individual classes will be include in the pacage list - otherwise, only packages are included.
+- `format`: The format of the method count output, either "list", "tree", "json", or "yaml".
+- `includeClasses`: When true, individual classes will be include in the package list - otherwise, only packages are included.
 - `includeFieldCount`: When true, the number of fields in a package or class will be included in the printed output.
-- `printAsTree`: When true, the output file will be formatted as a package tree, with nested packages indented, instead of the default list format.
+- `includeTotalMethodCount`: When true, the total number of methods in the application will be included in the printed output.
 - `orderByMethodCount`: When true, packages will be sorted in descending order by the number of methods they contain.
 - `verbose`: When true, the output file will also be printed to the build's standard output.
-- `exportAsCSV`: When true, the task will create a csv file with the summary: number of methods plus number of fields if includeFieldCount is true.
 
 ## Use with Jenkins Plot Plugin
 
-A common use-case is to plot method and field counts across builds.  The [Jenkins Plot plugin][0] is a general-purpose tool that graphs per-build scalar values through time.  It reads java .properties files, CSV files, and XML files.  The default dexcount output is a tab-separated, and using command-line tools can easily be converted into a form Jenkins can use.  Assuming a UNIX enviroment, it is simple.
-
-If you are counting both methods and fields, the following post-build script will (when you make the appropriate path substitutions) generate a .csv file:
-
-```bash
-INPUT=path/to/outputs/dexcount/debug.txt
-PLOT_FILE=path/to/jenkins/report.csv
-
-tail -n +2 $INPUT | awk '$3 !~ /\./ { methods += $1; fields += $2 } END { printf "methods,fields\n%d,%d\n", methods, fields }' > $PLOT_FILE
-```
-
-If you are counting only methods, the awk script changes slightly:
-
-```bash
-INPUT=path/to/outputs/dexcount/debug.txt
-METHOD_FILE=path/to/jenkins/report.csv
-
-tail -n +2 INPUT | awk '$2 !~ /\./ { methods += $1 } END { printf "methods\n%d\n", methods }' > $PLOT_FILE
-```
+A common use-case is to plot method and field counts across builds.  The [Jenkins Plot plugin][0] is a general-purpose tool that graphs per-build scalar values through time.  It reads java .properties files, CSV files, and XML files.  Dexcount generates two files for each variant - a full package list, and a summary CSV file.  The summary file is usable as-is with the Jenkins Plot Plugin.  You can find it in `app/build/outputs/variant.csv` (note the `.csv` extension).
 
 Consult the plugin documentation for details on how to configure it.
 
@@ -131,7 +107,7 @@ buildscript {
   }
 
   dependencies {
-    classpath 'com.getkeepsafe.dexcount:dexcount-gradle-plugin:0.2.2-SNAPSHOT'
+    classpath 'com.getkeepsafe.dexcount:dexcount-gradle-plugin:0.4.3-SNAPSHOT'
   }
 }
 ```
@@ -154,6 +130,6 @@ This plugin creates a task per output file, per variant, and configures each tas
 The Java code from the `com.android.dexdeps` package is sourced from the [Android source tree](https://android.googlesource.com/platform/dalvik.git/+/master/tools/dexdeps/).
 Inspired by Mihail Parparita's [`dex-method-counts`](https://github.com/mihaip/dex-method-counts) project, to whom much credit is due.
 
-Copyright 2015 KeepSafe Software, Inc
+Copyright 2015-2016 KeepSafe Software, Inc
 
 [0]: https://wiki.jenkins-ci.org/display/JENKINS/Plot+Plugin

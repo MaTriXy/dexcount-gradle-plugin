@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,9 +41,10 @@ repositories {
 dependencies {
     compile gradleApi()
     compile localGroovy()
-    compile 'com.android.tools.build:gradle:1.0.0'
+    compile 'com.android.tools.build:gradle:1.5.0'
+    compile 'com.google.code.gson:gson:2.5'
 
-    testCompile group: 'junit', name: 'junit', version: '4.11'
+    testCompile group: 'junit', name: 'junit', version: '4.12'
     testCompile 'org.spockframework:spock-core:1.0-groovy-2.3'
 }
 

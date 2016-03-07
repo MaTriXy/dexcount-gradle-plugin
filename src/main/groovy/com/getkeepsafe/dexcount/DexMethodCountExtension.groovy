@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ package com.getkeepsafe.dexcount
 class DexMethodCountExtension {
     private boolean includeClasses
     private boolean orderByMethodCount
-    private boolean includeFieldCount
-    private boolean printAsTree
+    private boolean includeFieldCount = true
+    private boolean includeTotalMethodCount = false
+    private OutputFormat format = OutputFormat.LIST
     private boolean verbose
-    private boolean exportAsCSV
 
     /**
      * When true, includes individual classes in task output.
@@ -37,18 +37,6 @@ class DexMethodCountExtension {
 
     public void setIncludeClasses(boolean includeClasses) {
         this.includeClasses = includeClasses
-    }
-
-    /**
-     * When true, the task output is formatted as a package tree, with
-     * indentation indicating the package hierarchy.
-     */
-    public boolean getPrintAsTree() {
-        return printAsTree
-    }
-
-    public void setPrintAsTree(boolean printAsTree) {
-        this.printAsTree = printAsTree
     }
 
     /**
@@ -76,6 +64,17 @@ class DexMethodCountExtension {
     }
 
     /**
+     * When true, includes the total number of methods in the task's output.
+     */
+    public boolean getIncludeTotalMethodCount() {
+        return includeTotalMethodCount
+    }
+
+    public void setIncludeTotalMethodCount(boolean includeTotalMethodCount) {
+        this.includeTotalMethodCount = includeTotalMethodCount;
+    }
+
+    /**
      * When true, the task's output list is sorted in descending order by
      * method counts, with larger packages appearing higher in the list.
      */
@@ -87,14 +86,20 @@ class DexMethodCountExtension {
         this.orderByMethodCount = orderByMethodCount
     }
 
-    /**
-     * When true, the task will create a csv file with the summary: number of methods plus number of fields if includeFieldCount is true.
-     */
-    public boolean getExportAsCSV() {
-        return this.exportAsCSV
+    public OutputFormat getFormat() {
+        return format;
     }
 
-    public void setExportAsCSV(boolean exportAsCSV) {
-        this.exportAsCSV = exportAsCSV
+    public void setFormat(Object format) {
+        if (format instanceof OutputFormat) {
+            this.format = (OutputFormat) format;
+        } else {
+            try {
+                def formatName = "$format".toUpperCase(Locale.US)
+                this.format = OutputFormat.valueOf(formatName)
+            } catch (IllegalArgumentException ignored) {
+                throw new IllegalArgumentException("Unrecognized output format '$format'")
+            }
+        }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -202,6 +202,129 @@ methods  fields   package/class name
 3        2        x.y.Z
 0        1        x.y.W
 """.trim()
+
+        trimmed == expected
+    }
+
+    def "package list can include total method count"() {
+        setup:
+        def tree = new PackageTree()
+        def sb = new StringBuilder()
+        def opts = new PrintOptions()
+        opts.includeTotalMethodCount = true
+        opts.includeClasses = false
+        opts.printHeader = false
+
+        when:
+        tree.addMethodRef("com.foo.Bar")
+        tree.addMethodRef("com.foo.Qux")
+        tree.addMethodRef("com.alpha.Beta")
+        tree.addMethodRef("org.whatever.Foo")
+        tree.addMethodRef("org.foo.Whatever")
+
+        tree.printPackageList(sb, opts)
+
+        then:
+        def trimmed = sb.toString().trim();
+        def expected = """
+Total methods: 5
+3        com
+1        com.alpha
+2        com.foo
+2        org
+1        org.foo
+1        org.whatever
+""".trim()
+
+        trimmed == expected
+    }
+
+    def "packages can be YAML-formatted"() {
+        setup:
+        def tree = new PackageTree()
+        def sb = new StringBuilder()
+        def opts = new PrintOptions()
+        opts.includeTotalMethodCount = true
+
+        when:
+        tree.addMethodRef("com.foo.Bar")
+        tree.addMethodRef("com.foo.Qux")
+        tree.addMethodRef("com.alpha.Beta")
+        tree.addMethodRef("org.whatever.Foo")
+        tree.addMethodRef("org.foo.Whatever")
+
+        tree.printYaml(sb, opts)
+
+        then:
+        def trimmed = sb.toString().trim()
+        def expected = """
+---
+methods: 5
+counts:
+  - name: com
+    methods: 3
+    children:
+      - name: alpha
+        methods: 1
+        children: []
+      - name: foo
+        methods: 2
+        children: []
+  - name: org
+    methods: 2
+    children:
+      - name: foo
+        methods: 1
+        children: []
+      - name: whatever
+        methods: 1
+        children: []""".trim()
+
+        trimmed == expected
+    }
+
+    def "can format YAML with only field counts"() {
+        setup:
+        def tree = new PackageTree()
+        def sb = new StringBuilder()
+        def opts = new PrintOptions()
+        opts.includeTotalMethodCount = true
+        opts.includeFieldCount = true
+        opts.includeMethodCount = false
+
+        tree.addFieldRef("com.foo.Bar")
+        tree.addFieldRef("com.foo.Qux")
+        tree.addFieldRef("com.alpha.Beta")
+        tree.addFieldRef("org.whatever.Foo")
+        tree.addFieldRef("org.foo.Whatever")
+
+        when:
+        tree.printYaml(sb, opts)
+
+        then:
+        def trimmed = sb.toString().trim()
+        def expected = """
+---
+fields: 5
+counts:
+  - name: com
+    fields: 3
+    children:
+      - name: alpha
+        fields: 1
+        children: []
+      - name: foo
+        fields: 2
+        children: []
+  - name: org
+    fields: 2
+    children:
+      - name: foo
+        fields: 1
+        children: []
+      - name: whatever
+        fields: 1
+        children: []""".trim()
 
         trimmed == expected
     }
