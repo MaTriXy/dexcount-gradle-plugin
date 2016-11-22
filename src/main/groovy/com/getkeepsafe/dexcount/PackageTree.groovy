@@ -16,8 +16,14 @@
 
 package com.getkeepsafe.dexcount
 
+import com.android.dexdeps.FieldRef
+import com.android.dexdeps.HasDeclaringClass
+import com.android.dexdeps.MethodRef
+import com.android.dexdeps.Output
 import com.google.gson.stream.JsonWriter
 import groovy.transform.CompileStatic
+import groovy.transform.stc.ClosureParams
+import groovy.transform.stc.FirstParam
 
 import java.nio.CharBuffer
 
@@ -28,60 +34,66 @@ class PackageTree {
     // invalidated by adding new nodes.
     private int methodTotal_ = -1
 
-    // The local count of method refs.  Will be zero for package nodes and
-    // non-zero for class nodes.
-    private int methodCount_ = 0
-
     // A cached sum of this node and all children's field-ref counts.
     // Same semantics as methodTotal_.
     private int fieldTotal_ = -1
 
-    // The local count of field refs.  Will be zero for package nodes and
-    // possibly non-zero for class nodes.
-    private int fieldCount_ = 0
-
     private final boolean isClass_
     private final String name_
     private final SortedMap<String, PackageTree> children_ = new TreeMap<>()
+    private final Deobfuscator deobfuscator_;
+
+    // The set of methods declared on this node.  Will be empty for package
+    // nodes and possibly non-empty for class nodes.
+    private final Set<HasDeclaringClass> methods_ = new HashSet<>();
+
+    // The set of fields declared on this node.  Will be empty for package
+    // nodes and possibly non-empty for class nodes.
+    private final Set<HasDeclaringClass> fields_ = new HashSet<>()
 
     PackageTree() {
-        this("", false)
+        this("", false, null)
     }
 
-    PackageTree(String name) {
-        this(name, isClassName(name))
+    PackageTree(Deobfuscator deobfuscator) {
+        this("", false, deobfuscator)
     }
 
-    private PackageTree(name, isClass) {
+    PackageTree(String name, Deobfuscator deobfuscator) {
+        this(name, isClassName(name), deobfuscator)
+    }
+
+    private PackageTree(name, isClass, Deobfuscator deobfuscator) {
         this.name_ = name
         this.isClass_ = isClass
+        this.deobfuscator_ = (deobfuscator ?: new Deobfuscator(null))
     }
 
     private static boolean isClassName(String name) {
         return Character.isUpperCase(name.charAt(0)) || name.contains("[]")
     }
 
-    public void addMethodRef(String fullyQualifiedClassName) {
-        addInternal(fullyQualifiedClassName, 0, true)
+    public void addMethodRef(MethodRef method) {
+        addInternal(descriptorToDot(method), 0, true, method)
     }
 
-    public void addFieldRef(String fullyQualifiedClassName) {
-        addInternal(fullyQualifiedClassName, 0, false)
+    public void addFieldRef(FieldRef field) {
+        addInternal(descriptorToDot(field), 0, false, field)
     }
 
-    private void addInternal(String name, int startIndex, boolean isMethod) {
+    private void addInternal(String name, int startIndex, boolean isMethod, HasDeclaringClass ref) {
         def ix = name.indexOf('.', startIndex)
         def segment = ix == -1 ? name.substring(startIndex) : name.substring(startIndex, ix)
         def child = children_[segment]
         if (child == null) {
-            child = children_[segment] = new PackageTree(segment)
+            child = children_[segment] = new PackageTree(segment, deobfuscator_)
         }
 
         if (ix == -1) {
             if (isMethod) {
-                child.methodCount_++
+                child.methods_.add((MethodRef) ref)
             } else {
-                child.fieldCount_++
+                child.fields_.add((FieldRef) ref)
             }
         } else {
             if (isMethod) {
@@ -89,13 +101,13 @@ class PackageTree {
             } else {
                 fieldTotal_ = -1
             }
-            child.addInternal(name, ix + 1, isMethod)
+            child.addInternal(name, ix + 1, isMethod, ref)
         }
     }
 
     int getMethodCount() {
         if (methodTotal_ == -1) {
-            methodTotal_ = (int) children_.values().inject(methodCount_) {
+            methodTotal_ = (int) children_.values().inject(methods_.size()) {
                 int sum, PackageTree child -> sum + child.getMethodCount() }
         }
         return methodTotal_
@@ -103,7 +115,7 @@ class PackageTree {
 
     int getFieldCount() {
         if (fieldTotal_ == -1) {
-            fieldTotal_ = (int) children_.values().inject(fieldCount_) {
+            fieldTotal_ = (int) children_.values().inject(fields_.size()) {
                 int sum, PackageTree child -> sum + child.getFieldCount() }
         }
         return fieldTotal_
@@ -143,7 +155,7 @@ class PackageTree {
             printPackageListHeader(out, opts)
         }
 
-        getChildren(opts).each { it -> it.printPackageListRecursively(out, sb, opts) }
+        forEach(getChildren(opts)) { it -> it.printPackageListRecursively(out, sb, 0, opts) }
     }
 
     private static def printPackageListHeader(Appendable out, PrintOptions opts) {
@@ -158,7 +170,11 @@ class PackageTree {
         out.append("package/class name\n")
     }
 
-    private void printPackageListRecursively(Appendable out, StringBuilder sb, PrintOptions opts) {
+    private void printPackageListRecursively(Appendable out, StringBuilder sb, int depth, PrintOptions opts) {
+        if (depth >= opts.maxTreeDepth) {
+            return
+        }
+
         def len = sb.length()
         if (len > 0) {
             sb.append(".")
@@ -178,15 +194,20 @@ class PackageTree {
             out.append('\n')
         }
 
-        getChildren(opts).each { PackageTree it -> it.printPackageListRecursively(out, sb, opts) }
+        forEach(getChildren(opts)) { PackageTree it -> it.printPackageListRecursively(out, sb, depth + 1, opts) }
         sb.setLength(len)
     }
 
     void printTree(Appendable out, PrintOptions opts) {
-        getChildren(opts).each { PackageTree it -> it.printTreeRecursively(out, 0, opts) }
+        forEach(getChildren(opts)) { PackageTree it -> it.printTreeRecursively(out, 0, opts) }
     }
 
     private void printTreeRecursively(Appendable out, int indent, PrintOptions opts) {
+        // 'indent' here is equal to the current tree depth
+        if (indent >= opts.maxTreeDepth) {
+            return
+        }
+
         indent.times { out.append("  ") }
         out.append(name_)
 
@@ -215,7 +236,7 @@ class PackageTree {
 
         out.append("\n")
 
-        getChildren(opts).each { PackageTree it -> it.printTreeRecursively(out, indent + 1, opts) }
+        forEach(getChildren(opts)) { PackageTree it -> it.printTreeRecursively(out, indent + 1, opts) }
     }
 
     void printJson(Appendable out, PrintOptions opts) {
@@ -240,10 +261,14 @@ class PackageTree {
         // Setting an indentation enables pretty-printing
         json.indent = "  "
 
-        printJsonRecursively(json, opts)
+        printJsonRecursively(json, 0, opts)
     }
 
-    private void printJsonRecursively(JsonWriter json, PrintOptions opts) {
+    private void printJsonRecursively(JsonWriter json, int depth, PrintOptions opts) {
+        if (depth >= opts.maxTreeDepth) {
+            return
+        }
+
         json.beginObject()
 
         json.name("name").value(name_)
@@ -259,7 +284,7 @@ class PackageTree {
         json.name("children")
         json.beginArray()
 
-        getChildren(opts).each { PackageTree it -> it.printJsonRecursively(json, opts) }
+        forEach(getChildren(opts)) { PackageTree it -> it.printJsonRecursively(json, depth + 1, opts) }
 
         json.endArray()
 
@@ -279,11 +304,15 @@ class PackageTree {
 
         out.append("counts:\n")
 
-        getChildren(opts).each { it.printYamlRecursively(out, 1, opts) }
+        forEach(getChildren(opts)) { it.printYamlRecursively(out, 0, opts) }
     }
 
-    private void printYamlRecursively(Appendable out, int indent, PrintOptions opts) {
-        String indentText = "  " * indent
+    private void printYamlRecursively(Appendable out, int depth, PrintOptions opts) {
+        if (depth > opts.maxTreeDepth) {
+            return
+        }
+
+        String indentText = "  " * ((depth * 2) + 1)
 
         out.append(indentText + "- name: ")
         out.append(name_)
@@ -303,14 +332,14 @@ class PackageTree {
             out.append("\n")
         }
 
-        def children = getChildren(opts)
+        def children = (depth + 1) == opts.maxTreeDepth ? (Collection<PackageTree>) [] : getChildren(opts)
         if (children.empty) {
             out.append(indentText)
             out.append("children: []\n")
         } else {
             out.append(indentText)
             out.append("children:\n")
-            children.each { PackageTree child -> child.printYamlRecursively(out, indent + 2, opts) }
+            forEach(children) { PackageTree child -> child.printYamlRecursively(out, depth + 1, opts) }
         }
     }
 
@@ -337,5 +366,42 @@ class PackageTree {
 
     private static String pluralizeFields(int n) {
         return n == 1 ? "field" : "fields"
+    }
+
+    private String descriptorToDot(HasDeclaringClass ref) {
+        def descriptor = ref.getDeclClassName()
+        def dot = Output.descriptorToDot(descriptor)
+        dot = deobfuscator_.deobfuscate(dot)
+        if (dot.indexOf('.') == -1) {
+            // Classes in the unnamed package (e.g. primitive arrays)
+            // will not appear in the output in the current PackageTree
+            // implementation if classes are not included.  To work around,
+            // we make an artificial package named "<unnamed>".
+            dot = "<unnamed>." + dot
+        }
+        return dot
+    }
+
+    /**
+     * Iterates through the elements of a collection, applying the given
+     * closure to each element.
+     *
+     * Workaround for old versions of Gradle that do not have the method
+     * {@link org.codehaus.groovy.runtime.DefaultGroovyMethods#each(Collection, Closure)}.
+     *
+     * Without any workaround, projects building using these versions of Groovy,
+     * we will fail with a MethodMissingException.
+     *
+     * This is observed in projects using Gradle 2.2.1, which bundles Groovy 2.3.7.
+     *
+     * @param collection
+     * @param closure
+     */
+    private static <E> void forEach(
+            Collection<E> collection,
+            @ClosureParams(FirstParam.FirstGenericType.class) Closure closure) {
+        for (E element : collection) {
+            closure.call(element);
+        }
     }
 }

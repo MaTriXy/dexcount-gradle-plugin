@@ -24,8 +24,15 @@ class DexMethodCountExtension {
     private boolean orderByMethodCount
     private boolean includeFieldCount = true
     private boolean includeTotalMethodCount = false
+    private boolean teamCityIntegration = false
+    private boolean enableForInstantRun = false
     private OutputFormat format = OutputFormat.LIST
     private boolean verbose
+    private boolean printVersion
+    private int maxTreeDepth = Integer.MAX_VALUE
+    private int dxTimeoutSec = 60;
+    private String teamCitySlug = null
+    private boolean runOnEachAssemble = true
 
     /**
      * When true, includes individual classes in task output.
@@ -75,6 +82,17 @@ class DexMethodCountExtension {
     }
 
     /**
+     * When true, includes output for team city statistic integration
+     */
+    public boolean getTeamCityIntegration() {
+        return teamCityIntegration
+    }
+
+    public void setTeamCityIntegration(boolean teamCityIntegration) {
+        this.teamCityIntegration = teamCityIntegration;
+    }
+
+    /**
      * When true, the task's output list is sorted in descending order by
      * method counts, with larger packages appearing higher in the list.
      */
@@ -90,6 +108,30 @@ class DexMethodCountExtension {
         return format;
     }
 
+    public void setMaxTreeDepth(int maxTreeDepth) {
+        this.maxTreeDepth = maxTreeDepth
+    }
+
+    public int getMaxTreeDepth() {
+        return this.maxTreeDepth
+    }
+
+    int getDxTimeoutSec() {
+        return dxTimeoutSec
+    }
+
+    void setDxTimeoutSec(int dxTimeoutSec) {
+        this.dxTimeoutSec = dxTimeoutSec
+    }
+
+    boolean getPrintVersion() {
+        return this.printVersion
+    }
+
+    void setPrintVersion(boolean printVersion) {
+        this.printVersion = printVersion;
+    }
+
     public void setFormat(Object format) {
         if (format instanceof OutputFormat) {
             this.format = (OutputFormat) format;
@@ -101,5 +143,29 @@ class DexMethodCountExtension {
                 throw new IllegalArgumentException("Unrecognized output format '$format'")
             }
         }
+    }
+
+    public boolean getEnableForInstantRun() {
+        return enableForInstantRun;
+    }
+
+    public void setEnableForInstantRun(boolean enableForInstantRun) {
+        this.enableForInstantRun = enableForInstantRun;
+    }
+
+    public String getTeamCitySlug() {
+        return teamCitySlug
+    }
+
+    public void setTeamCitySlug(String teamcitySlug) {
+        this.teamCitySlug = teamcitySlug
+    }
+
+    public boolean getRunOnEachAssemble() {
+        return runOnEachAssemble
+    }
+
+    public void setRunOnEachAssemble(boolean runOnEachAssemble) {
+        this.runOnEachAssemble = runOnEachAssemble
     }
 }

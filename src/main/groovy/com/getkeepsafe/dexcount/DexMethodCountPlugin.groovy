@@ -17,14 +17,26 @@
 package com.getkeepsafe.dexcount
 
 import com.android.build.gradle.api.BaseVariant
+import com.android.build.gradle.api.BaseVariantOutput
+import com.getkeepsafe.dexcount.sdkresolver.SdkResolver
 import org.gradle.api.DomainObjectCollection
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 
 class DexMethodCountPlugin implements Plugin<Project> {
+    public static File sdkLocation = SdkResolver.resolve(null)
+
     @Override
     void apply(Project project) {
+        if (!isAtLeastJavaEight()) {
+            project.logger.error("Java 8 or above is *STRONGLY* recommended - dexcount may not work properly on Java 7 or below!")
+        }
+
+        sdkLocation = SdkResolver.resolve(project)
+
         if (project.plugins.hasPlugin('com.android.application')) {
+            applyAndroid(project, (DomainObjectCollection<BaseVariant>) project.android.applicationVariants);
+        } else if (project.plugins.hasPlugin('com.android.test')) {
             applyAndroid(project, (DomainObjectCollection<BaseVariant>) project.android.applicationVariants);
         } else if (project.plugins.hasPlugin('com.android.library')) {
             applyAndroid(project, (DomainObjectCollection<BaseVariant>) project.android.libraryVariants);
@@ -33,31 +45,82 @@ class DexMethodCountPlugin implements Plugin<Project> {
         }
     }
 
+    private static boolean isAtLeastJavaEight() {
+        String version = System.properties["java.version"]
+        if (version == null) {
+            // All JVMs provide this property... what's going on?
+            return false
+        }
+
+        // Java version strings are something like 1.8.0_65; we don't
+        // care about the third component, if it exists.  Skip it.
+        def indexOfDecimal = version.indexOf('.')
+        indexOfDecimal = version.indexOf('.', indexOfDecimal + 1)
+
+        if (indexOfDecimal != -1) {
+            version = version.substring(0, indexOfDecimal)
+        }
+
+        try {
+            def numericVersion = Double.parseDouble(version)
+            return numericVersion >= 1.8
+        } catch (NumberFormatException ignored) {
+            // Invalid Java version number; who knows.
+            return false;
+        }
+    }
+
     private static void applyAndroid(Project project, DomainObjectCollection<BaseVariant> variants) {
         project.extensions.create('dexcount', DexMethodCountExtension)
 
         variants.all { variant ->
             variant.outputs.each { output ->
-                def slug = variant.name.capitalize()
-                def path = "${project.buildDir}/outputs/dexcount/${variant.name}"
-                if (variant.outputs.size() > 1) {
-                    slug += output.name.capitalize()
-                    path += "/${output.name}"
-                }
-
-                def ext = project.extensions['dexcount'] as DexMethodCountExtension
-                def format = ext.format
-
-                def task = project.tasks.create("count${slug}DexMethods", DexMethodCountTask)
-                task.description = "Outputs dex method count for ${variant.name}."
-                task.group = 'Reporting'
-                task.apkOrDex = output
-                task.mappingFile = variant.mappingFile
-                task.outputFile = project.file(path + format.extension)
-                task.summaryFile = project.file(path + '.csv')
-                task.config = ext
-                variant.assemble.doLast { task.countMethods() }
+                applyToVariantOutput(project, variant, output)
             }
+        }
+    }
+
+    private static void applyToVariantOutput(Project project, BaseVariant variant, BaseVariantOutput output) {
+        def slug = variant.name.capitalize()
+        def path = "${project.buildDir}/outputs/dexcount/${variant.name}"
+        if (variant.outputs.size() > 1) {
+            slug += output.name.capitalize()
+            path += "/${output.name}"
+        }
+
+        def ext = project.extensions['dexcount'] as DexMethodCountExtension
+        def format = ext.format
+
+        def isInstantRun = project.properties["android.optional.compilation"] == "INSTANT_DEV"
+        if (isInstantRun && !ext.enableForInstantRun) {
+            return
+        }
+
+        // If the user has passed '--stacktrace' or '--full-stacktrace', assume
+        // that they are trying to report a dexcount bug.  Help us help them out
+        // by printing the current plugin title and version.
+        if (GradleApi.isShowStacktrace(project.gradle.startParameter)) {
+            ext.printVersion = true
+        }
+
+        def task = project.tasks.create("count${slug}DexMethods", DexMethodCountTask)
+        task.description = "Outputs dex method count for ${variant.name}."
+        task.group = 'Reporting'
+        task.apkOrDex = output
+        task.mappingFile = variant.mappingFile
+        task.outputFile = project.file(path + format.extension)
+        task.summaryFile = project.file(path + '.csv')
+        task.chartDir = project.file(path + 'Chart')
+        task.config = ext
+
+        // Dexcount tasks require that assemble has been run...
+        task.dependsOn(variant.assemble)
+        task.mustRunAfter(variant.assemble)
+
+        // But assemble should always imply that dexcount runs, unless configured not to.
+        def runOnEachAssemble = ext.runOnEachAssemble
+        if (runOnEachAssemble) {
+            variant.assemble.finalizedBy(task)
         }
     }
 }
