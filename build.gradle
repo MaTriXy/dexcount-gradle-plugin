@@ -14,69 +14,56 @@
  * limitations under the License.
  */
 
-apply plugin: 'groovy'
-apply plugin: 'java'
-apply plugin: 'com.github.ben-manes.versions'
-
-sourceCompatibility = JavaVersion.VERSION_1_7
-
-group = GROUP
-version = VERSION_NAME
-
 buildscript {
+    apply from: rootProject.file("gradle/versions.gradle")
+
     repositories {
         maven { url "https://plugins.gradle.org/m2/" } // Mirrors jcenter() and mavenCentral()
     }
 
     dependencies {
-        // Check for plugin updates
-        classpath "com.github.ben-manes:gradle-versions-plugin:0.12.0"
+        classpath plugs.gradleVersionsPlugin // Check for plugin updates
+        classpath plugs.kotlinGradlePlugin
     }
 }
 
-repositories {
-    maven { url "https://plugins.gradle.org/m2/" } // Mirrors jcenter() and mavenCentral()
+allprojects {
+    repositories {
+        mavenLocal()
+        maven { url "https://plugins.gradle.org/m2/" } // Mirrors jcenter() and mavenCentral()
+        google()
+    }
 }
+
+apply plugin: "groovy"
+apply plugin: "java-gradle-plugin"
+apply plugin: "kotlin"
+apply plugin: "com.github.ben-manes.versions"
+
+sourceCompatibility = rootProject.ext.sourceCompatibilityVersion
+
+group = GROUP
+version = VERSION_NAME
 
 jar {
     manifest {
         attributes(
-                'Implementation-Title': POM_ARTIFACT_ID,
-                'Implementation-Version': VERSION_NAME)
+                "Implementation-Title": POM_ARTIFACT_ID,
+                "Implementation-Version": VERSION_NAME)
     }
 }
 
 dependencies {
-    compile gradleApi()
-    compile 'com.android.tools.build:gradle:2.2.3'
-    compile 'com.google.code.gson:gson:2.6.2'
+    implementation localGroovy()
+    implementation deps.kotlinStdlib
+    implementation deps.gson
 
-    testCompile 'junit:junit:4.12'
-    testCompile('org.spockframework:spock-core:1.0-groovy-2.4') {
-        exclude module: 'groovy-all'
-    }
+    compileOnly plugs.gradle
+
+    testImplementation plugs.gradle
+    testImplementation deps.junit
+    testImplementation deps.spockCore, { exclude module: "groovy-all" } // Use localGroovy()
 }
 
-task groovydocJar(type: Jar, dependsOn: groovydoc) {
-    classifier = 'groovydoc'
-    from 'build/docs/groovydoc'
-}
-
-task javadocJar(type: Jar, dependsOn: javadoc) {
-    classifier = 'javadoc'
-    from 'build/docs/javadoc'
-}
-
-task sourcesJar(type: Jar) {
-    from sourceSets.main.allSource
-    classifier = 'sources'
-}
-
-artifacts {
-    archives jar
-    archives groovydocJar
-    archives javadocJar
-    archives sourcesJar
-}
-
-apply from: file('gradle/gradle-mvn-push.gradle')
+apply from: rootProject.file("gradle/gradle-mvn-push.gradle")
+apply from: rootProject.file("gradle/compile.gradle")

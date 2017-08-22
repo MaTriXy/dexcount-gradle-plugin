@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 KeepSafe Software
+ * Copyright (C) 2015-2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,14 @@
 
 package com.getkeepsafe.dexcount
 
-class DexCountException extends RuntimeException {
-    DexCountException() {}
-    DexCountException(String message) { super(message) }
-    DexCountException(String message, Throwable cause) { super(message, cause) }
+class PrintOptions {
+    var includeClasses: Boolean = false
+    var includeClassCount: Boolean = false
+    var includeMethodCount: Boolean = true
+    var includeFieldCount: Boolean = false
+    var includeTotalMethodCount: Boolean = false
+    var teamCityIntegration: Boolean = false
+    var printHeader: Boolean = false
+    var orderByMethodCount: Boolean = false
+    var maxTreeDepth = Integer.MAX_VALUE
 }

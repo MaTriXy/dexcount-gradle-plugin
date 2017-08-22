@@ -1,23 +1,18 @@
 language: android
 
-android:
-  components:
-    - platform-tools
-    - tools
-    - build-tools-23.0.3
-    - android-23
-    - extra-google-m2repository
-    - extra-android-m2repository
-    - extra-android-support
-
-groovy:
-  - 2.3.6
-  - 2.3.9
+dist: precise
 
 jdk:
   - oraclejdk8
 
-install: true
+android:
+  components:
+    - tools
+    - platform-tools
+    - build-tools-25.0.3
+    - android-25
+    - extra-google-m2repository
+    - extra-android-m2repository
 
 script:
   - ./.buildscript/test.sh
@@ -33,10 +28,10 @@ env:
 sudo: false
 
 before_cache:
-  - rm -f $HOME/.gradle/caches/modules-2/modules-2.lock
-
+  - rm -f  $HOME/.gradle/caches/modules-2/modules-2.lock
+  - rm -fr $HOME/.gradle/caches/*/plugin-resolution/
 cache:
   directories:
-    - $HOME/.gradle
     - $HOME/.gradle/caches/
     - $HOME/.gradle/wrapper/
+    - $HOME/.android/build-cache

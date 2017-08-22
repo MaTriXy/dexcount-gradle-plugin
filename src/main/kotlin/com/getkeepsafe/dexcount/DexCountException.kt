@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2016 KeepSafe Software
+ * Copyright (C) 2016 KeepSafe Software
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,8 @@
 
 package com.getkeepsafe.dexcount
 
-class PrintOptions {
-    def includeClasses = false
-    def includeMethodCount = true
-    def includeFieldCount = false
-    def includeTotalMethodCount = false
-    def teamCityIntegration = false
-    def printHeader = false
-    def orderByMethodCount = false
-    def int maxTreeDepth = Integer.MAX_VALUE
+class DexCountException : RuntimeException {
+    constructor()
+    constructor(message: String) : super(message)
+    constructor(message: String, cause: Throwable) : super(message, cause)
 }

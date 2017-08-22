@@ -1,3 +1,35 @@
+0.7.3 (released 14 July 2017)
+---------
+* Fix builds when Instant Run is enabled and `dexcount` extension is used (#190)
+
+0.7.2 (released 10 July 2017)
+---------
+* Fix counting AAR projects on AGP 3.0+ (#188)
+
+0.7.1 (released 22 June 2017)
+---------
+* Add class count to output and summary files (#184)
+* Fix counting renamed variant outputs (#182)
+* Remove use of `uncapitalize()` for users of Gradle < 2.5 (#180)
+
+0.7.0 (released 12 June 2017)
+---------
+* Deprecate `runOnEachAssemble` configuration property
+* Make Android Gradle plugin a compileOnly dependency (#176)
+* Disable Instant Run support; incompatible with the new build tools
+* Add support for Android Gradle Plugin 3.0.0
+* Add class counts (#164)
+* Fix zip-file-handle leaks (#160)
+
+0.6.4 (released 6 April 2017)
+---------
+* Update dexdeps to handle .dex format version 037 (#158)
+
+0.6.3 (released π 2017)
+---------
+* Add maxMethodCount option to fail builds if the count is exceeded (#152)
+* Add NDK support for AARs (#145)
+
 0.6.2 (released 16 December 2016)
 ---------
 * Don't attempt to count methods on files that don't exist (#139)
