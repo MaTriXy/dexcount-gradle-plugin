@@ -1,3 +1,18 @@
+0.8.2 (released 30 November 2017)
+---------
+* Remove ported SdkResolver (#232)
+* Fix counts where output file has been renamed (#229)
+* Update Android Gradle support to 3.1.0 (#225)
+
+0.8.1 (released 21 September 2017)
+---------
+* Fix for users of Android Gradle Plugin versions below 3.0
+
+0.8.0 (released 20 September 2017)
+---------
+* Update modern counting task to use Android Studio 3.0's new variant API (#218)
+* Rewrite from Groovy -> Kotlin
+
 0.7.3 (released 14 July 2017)
 ---------
 * Fix builds when Instant Run is enabled and `dexcount` extension is used (#190)

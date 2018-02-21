@@ -19,12 +19,11 @@ package com.getkeepsafe.dexcount
 import com.android.build.gradle.api.BaseVariantOutput
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
-import org.gradle.api.Nullable
 import org.gradle.api.logging.LogLevel
-import org.gradle.api.tasks.InputDirectory
-import org.gradle.api.tasks.ParallelizableTask
+import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.TaskAction
 import java.io.File
+import javax.annotation.Nullable
 
 /**
  * The maximum number of method refs and field refs allowed in a single Dex
@@ -32,26 +31,35 @@ import java.io.File
  */
 const val MAX_DEX_REFS: Int = 0xFFFF // 65535
 
-@ParallelizableTask
 open class ModernMethodCountTask: DexMethodCountTaskBase() {
+
+    lateinit var inputFileProvider: () -> File
+
     /**
-     * The output directory of the 'package' task; will contain an
-     * APK or an AAR.
+     * The output of the 'package' task; will be either an APK or an AAR.
      */
-    @InputDirectory
-    lateinit var inputDirectory: File
+    @InputFile
+    fun getInputFile(): File {
+        return inputFileProvider()
+    }
 
     override val fileToCount: File?
-        get() = inputDirectory.listFiles { _, name ->
-            name?.endsWith(".apk") ?: false
-        }.firstOrNull()
+        get() = getInputFile()
 
     override val rawInputRepresentation: String
-        get() = "$inputDirectory"
+        get() = "${getInputFile()}"
 }
 
-@ParallelizableTask
 open class LegacyMethodCountTask: DexMethodCountTaskBase() {
+
+    /**
+     * The output of the 'assemble' task, on AGP < 3.0.  Its 'outputFile'
+     * property will point to either an AAR or an APK.
+     *
+     * We don't use [@Input][org.gradle.api.tasks.Input] here because
+     * [BaseVariantOutput] implementations aren't is [Serializable].  This
+     * makes Gradle's input cache routines crash, sometimes.
+     */
 
     lateinit var variantOutput: BaseVariantOutput
 

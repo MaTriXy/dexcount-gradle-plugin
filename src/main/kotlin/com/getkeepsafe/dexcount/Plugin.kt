@@ -26,19 +26,24 @@ import com.android.build.gradle.api.BaseVariant
 import com.android.build.gradle.api.BaseVariantOutput
 import com.android.build.gradle.api.LibraryVariant
 import com.android.build.gradle.api.TestVariant
-import com.android.builder.Version
 import com.android.repository.Revision
-import com.getkeepsafe.dexcount.sdkresolver.SdkResolver
 import org.gradle.api.DomainObjectCollection
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.Task
 import java.io.File
+import java.lang.reflect.Method
 import kotlin.reflect.KClass
 
 open class DexMethodCountPlugin: Plugin<Project> {
     companion object {
-        var sdkLocation: File? = SdkResolver.resolve(null)
+        var sdkLocation: File? = null
+        private const val VERSION_3_ZERO_FIELD: String = "com.android.builder.Version" // <= 3.0
+        private const val VERSION_3_ONE_FIELD: String = "com.android.builder.model.Version" // > 3.1
+        private const val AGP_VERSION_FIELD: String = "ANDROID_GRADLE_PLUGIN_VERSION"
+        private const val AGP_VERSION_3: String = "3.0.0"
+        private const val ANDROID_EXTENSION_NAME = "android"
+        private const val SDK_DIRECTORY_METHOD = "getSdkDirectory"
     }
 
     override fun apply(project: Project) {
@@ -46,16 +51,32 @@ open class DexMethodCountPlugin: Plugin<Project> {
             project.logger.error("Java 8 or above is *STRONGLY* recommended - dexcount may not work properly on Java 7 or below!")
         }
 
+        var gradlePluginVersion: String? = null
+        var exception: Exception? = null
+
         try {
-            Class.forName("com.android.builder.Version")
-        } catch (e: ClassNotFoundException) {
-            throw IllegalStateException("dexcount requires the Android plugin to be configured", e)
+            gradlePluginVersion = Class.forName(VERSION_3_ZERO_FIELD).getDeclaredField(AGP_VERSION_FIELD).get(this).toString()
+        } catch (e: Exception) {
+            exception = e
         }
 
-        sdkLocation = SdkResolver.resolve(project)
+        try {
+            gradlePluginVersion = Class.forName(VERSION_3_ONE_FIELD).getDeclaredField(AGP_VERSION_FIELD).get(this).toString()
+        } catch (e: Exception) {
+            exception = e
+        }
 
-        val gradlePluginRevision = Revision.parseRevision(Version.ANDROID_GRADLE_PLUGIN_VERSION)
-        val threeOhRevision = Revision.parseRevision("3.0.0")
+        if (gradlePluginVersion == null && exception != null) {
+            throw IllegalStateException("dexcount requires the Android plugin to be configured", exception)
+        } else if (gradlePluginVersion == null) {
+            throw IllegalStateException("dexcount requires the Android plugin to be configured")
+        }
+
+        val android = project.extensions.findByName(ANDROID_EXTENSION_NAME)
+        sdkLocation = android?.javaClass?.getMethod(SDK_DIRECTORY_METHOD)?.invoke(android) as File?
+
+        val gradlePluginRevision = Revision.parseRevision(gradlePluginVersion, Revision.Precision.PREVIEW)
+        val threeOhRevision = Revision.parseRevision(AGP_VERSION_3)
 
         val isBuildTools3 = gradlePluginRevision.compareTo(threeOhRevision, Revision.PreviewComparison.IGNORE) >= 0
 
@@ -82,6 +103,12 @@ abstract class TaskProvider(
         }
     }
 
+    private val baseVariant_getOutputs: Method by lazy {
+        BaseVariant::class.java.getDeclaredMethod("getOutputs").apply {
+            isAccessible = true
+        }
+    }
+
     fun apply() {
         // We need to do this check *after* we create the 'dexcount' Gradle extension.
         // If we bail on instant run builds any earlier, then the build will break
@@ -94,17 +121,17 @@ abstract class TaskProvider(
         val variants: DomainObjectCollection<out BaseVariant> = when {
             project.plugins.hasPlugin("com.android.application") -> {
                 val ext = project.extensions.findByType(AppExtension::class.java)
-                ext.applicationVariants
+                ext!!.applicationVariants
             }
 
             project.plugins.hasPlugin("com.android.test") -> {
                 val ext = project.extensions.findByType(TestExtension::class.java)
-                ext.applicationVariants
+                ext!!.applicationVariants
             }
 
             project.plugins.hasPlugin("com.android.library") -> {
                 val ext = project.extensions.findByType(LibraryExtension::class.java)
-                ext.libraryVariants
+                ext!!.libraryVariants
             }
 
             else -> throw IllegalArgumentException("Dexcount plugin requires the Android plugin to be configured")
@@ -136,6 +163,17 @@ abstract class TaskProvider(
         }
     }
 
+    /**
+     * Gets the outputs for the given [variant] as a basic [Collection].
+     *
+     * This is useful for AGP < 3.0, where the return type is _not_ a
+     * [DomainObjectCollection].
+     */
+    protected fun getOutputsForVariant(variant: BaseVariant): Collection<BaseVariantOutput> {
+        @Suppress("UNCHECKED_CAST")
+        return baseVariant_getOutputs(variant) as Collection<BaseVariantOutput>
+    }
+
     protected fun <T : DexMethodCountTaskBase> createTask(
             taskClass: KClass<T>,
             variant: BaseVariant,
@@ -144,7 +182,7 @@ abstract class TaskProvider(
         var slug = variant.name.capitalize()
         var path = "${project.buildDir}/outputs/dexcount/${variant.name}"
         var outputName = variant.name
-        if (variant.outputs.size > 1) {
+        if (getOutputsForVariant(variant).size > 1) {
             if (output == null) { throw AssertionError("Output should never be null here") }
             slug += output.name.capitalize()
             path += "/${output.name}"
@@ -176,14 +214,14 @@ class LegacyProvider(project: Project): TaskProvider(project) {
     }
 
     override fun applyToLibraryVariant(variant: LibraryVariant) {
-        variant.outputs.all { output ->
+        getOutputsForVariant(variant).forEach { output ->
             val task = createTask(LegacyMethodCountTask::class, variant, output) { t -> t.variantOutput = output }
             addDexcountTaskToGraph(output.assemble, task)
         }
     }
 
     private fun applyToApkVariant(variant: ApkVariant) {
-        variant.outputs.all { output ->
+        getOutputsForVariant(variant).forEach { output ->
             val task = createTask(LegacyMethodCountTask::class, variant, output) { t -> t.variantOutput = output }
             addDexcountTaskToGraph(output.assemble, task)
         }
@@ -201,7 +239,9 @@ class ThreeOhProvider(project: Project): TaskProvider(project) {
 
     override fun applyToLibraryVariant(variant: LibraryVariant) {
         val packageTask = variant.packageLibrary
-        val dexcountTask = createTask(ModernMethodCountTask::class, variant, null) { t -> t.inputDirectory = packageTask.archivePath }
+        val dexcountTask = createTask(ModernMethodCountTask::class, variant, null) { t ->
+            t.inputFileProvider = { packageTask.archivePath }
+        }
         addDexcountTaskToGraph(packageTask, dexcountTask)
     }
 
@@ -209,8 +249,9 @@ class ThreeOhProvider(project: Project): TaskProvider(project) {
         variant.outputs.all { output ->
             if (output is ApkVariantOutput) {
                 // why wouldn't it be?
-                val packageDirectory = output.packageApplication.outputDirectory
-                val task = createTask(ModernMethodCountTask::class, variant, output) { t -> t.inputDirectory = packageDirectory }
+                val task = createTask(ModernMethodCountTask::class, variant, output) { t ->
+                    t.inputFileProvider = { output.outputFile }
+                }
                 addDexcountTaskToGraph(output.packageApplication, task)
             } else {
                 throw IllegalArgumentException("Unexpected output type for variant ${variant.name}: ${output::class.java}")
