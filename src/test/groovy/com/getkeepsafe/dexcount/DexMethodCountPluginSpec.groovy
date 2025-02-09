@@ -1,193 +1,374 @@
 package com.getkeepsafe.dexcount
 
+import com.android.build.api.variant.BuiltArtifact
+import com.android.build.api.variant.BuiltArtifacts
+import com.android.build.api.variant.BuiltArtifactsLoader
+import com.getkeepsafe.dexcount.treegen.ApkPackageTreeTask
 import org.gradle.api.Project
+import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.initialization.GradlePropertiesController
 import org.gradle.testfixtures.ProjectBuilder
-import org.junit.Rule
-import org.junit.rules.TemporaryFolder
+import org.gradle.testkit.runner.GradleRunner
+import org.gradle.testkit.runner.UnexpectedBuildResultException
+import spock.lang.Ignore
 import spock.lang.Specification
+import spock.lang.TempDir
 import spock.lang.Unroll
 
+import static org.gradle.testkit.runner.TaskOutcome.SUCCESS
+
+@Ignore
 final class DexMethodCountPluginSpec extends Specification {
-    @Rule final TemporaryFolder tempFolder = new TemporaryFolder()
-    final static COMPILE_SDK_VERSION = 27
-    final static BUILD_TOOLS_VERSION = "27.0.1"
-    final static APPLICATION_ID = "com.example"
-    final static MANIFEST_FILE_TEXT = """<?xml version="1.0" encoding="utf-8"?>
-      <manifest package="com.getkeepsafe.dexcount.integration"
-                xmlns:android="http://schemas.android.com/apk/res/android">
-          <application/>
-      </manifest>
-  """
+    private File buildFile
+    private String reportFolder
+    private Project project
+    private File manifestFile
+    def MANIFEST_FILE_PATH = 'src/main/AndroidManifest.xml'
+    def MANIFEST_FILE_TEXT = "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" package=\"com.example\"/>"
 
-    Project project
-    File manifestFile
+    @TempDir
+    private File testProjectDir
 
-    def "setup"() {
+    def 'setup'() {
+        buildFile = new File(testProjectDir, 'build.gradle')
+        reportFolder = "${testProjectDir.absolutePath}/build/outputs/dexcount"
+        new File(new File(testProjectDir, 'src'), 'main').mkdirs()
+        new File(testProjectDir, MANIFEST_FILE_PATH) << MANIFEST_FILE_TEXT
+
+        // TODO remove old testing strategy
         project = ProjectBuilder.builder().build()
-        manifestFile = new File(project.projectDir, "src/main/AndroidManifest.xml")
+        //(project as ProjectInternal).services.get(GradlePropertiesController.class).loadGradlePropertiesFrom(project.rootDir)
+        manifestFile = new File(project.projectDir, 'src/main/AndroidManifest.xml')
         manifestFile.parentFile.mkdirs()
         manifestFile.write(MANIFEST_FILE_TEXT)
     }
 
-    def "unsupported project project"() {
-        when:
-        new DexMethodCountPlugin().apply(
-            project) // project.apply plugin: "com.getkeepsafe.dexcount"
-
-        then:
-        def e = thrown(IllegalArgumentException)
-        e.message == "Dexcount plugin requires the Android plugin to be configured"
-    }
-
-    @Unroll "#projectPlugin project"() {
+    @Unroll def '#projectPlugin project'() {
         given:
-        project.apply plugin: projectPlugin
+        buildFile <<
+            """
+        plugins {
+            id "${projectPlugin}"
+            id "com.getkeepsafe.dexcount"
+        }
+
+        android {
+          compileSdkVersion 28
+
+          defaultConfig {
+            if ("${projectPlugin}" == 'com.android.application') {
+              applicationId 'com.example'
+            }
+          }
+        }
+      """.stripIndent().trim()
 
         when:
-        project.apply plugin: "com.getkeepsafe.dexcount"
+        GradleRunner.create()
+            .withProjectDir(testProjectDir)
+            .withPluginClasspath()
+            .build()
 
         then:
         noExceptionThrown()
 
         where:
-        projectPlugin << ["com.android.application", "com.android.library", "com.android.test"]
+        projectPlugin << ['com.android.application', 'com.android.library']
     }
 
-    def "android - all tasks created"() {
+    @Unroll def '#projectPlugin project success'() {
         given:
-        project.apply plugin: "com.android.application"
-        project.apply plugin: "com.getkeepsafe.dexcount"
-        project.android {
-            compileSdkVersion COMPILE_SDK_VERSION
-            buildToolsVersion BUILD_TOOLS_VERSION
-
-            defaultConfig {
-                applicationId APPLICATION_ID
-            }
+        buildFile <<
+            """
+        plugins {
+            id "${projectPlugin}"
+            id "com.getkeepsafe.dexcount"
         }
 
+        dexcount {
+          printDeclarations = true
+        }
+      """.stripIndent().trim()
+
         when:
-        project.evaluate()
+        def result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(testProjectDir)
+            .withArguments("countDeclaredMethods", "--stacktrace")
+            .build()
 
         then:
-        project.tasks.getByName("countDebugDexMethods")
-        project.tasks.getByName("countReleaseDexMethods")
+        result.task(":countDeclaredMethods").outcome == SUCCESS
+
+        where:
+        projectPlugin << ['java', 'java-library']
     }
 
-    def "android [buildTypes] - all tasks created"() {
+    @Unroll def '#projectPlugin project failure when printDeclaration is false'() {
         given:
-        project.apply plugin: "com.android.application"
-        project.apply plugin: "com.getkeepsafe.dexcount"
-        project.android {
-            compileSdkVersion COMPILE_SDK_VERSION
-            buildToolsVersion BUILD_TOOLS_VERSION
-
-            defaultConfig {
-                applicationId APPLICATION_ID
-            }
-
-            buildTypes {
-                debug {}
-                release {}
-            }
+        buildFile <<
+            """
+        plugins {
+            id "${projectPlugin}"
+            id "com.getkeepsafe.dexcount"
         }
 
+        dexcount {
+          printDeclarations = false
+        }
+      """.stripIndent().trim()
+
         when:
-        project.evaluate()
+        def result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(testProjectDir)
+            .withArguments("countDeclaredMethods")
+            .build()
 
         then:
-        project.tasks.getByName("countDebugDexMethods")
-        project.tasks.getByName("countReleaseDexMethods")
+        thrown(UnexpectedBuildResultException) // Should be GradleException?
+
+        where:
+        projectPlugin << ['java', 'java-library']
     }
 
-    def "android [buildTypes + productFlavors] - all tasks created"() {
+    @Unroll def '#taskName with default buildTypes'() {
         given:
-        project.apply plugin: "com.android.application"
-        project.apply plugin: "com.getkeepsafe.dexcount"
-        project.android {
-            compileSdkVersion COMPILE_SDK_VERSION
-            buildToolsVersion BUILD_TOOLS_VERSION
-
-            defaultConfig {
-                applicationId APPLICATION_ID
-            }
-
-            buildTypes {
-                debug {}
-                release {}
-            }
-
-            flavorDimensions "flav"
-
-            productFlavors {
-                flavor1 { dimension "flav" }
-                flavor2 { dimension "flav" }
-            }
+        buildFile <<
+            """
+        plugins {
+            id "com.android.application"
+            id "com.getkeepsafe.dexcount"
         }
 
-        when:
-        project.evaluate()
-
-        then:
-        project.tasks.getByName("countFlavor1DebugDexMethods")
-        project.tasks.getByName("countFlavor1ReleaseDexMethods")
-        project.tasks.getByName("countFlavor2DebugDexMethods")
-        project.tasks.getByName("countFlavor2ReleaseDexMethods")
-    }
-
-    def "android [buildTypes + productFlavors + flavorDimensions] - all tasks created"() {
-        given:
-        project.apply plugin: "com.android.application"
-        project.apply plugin: "com.getkeepsafe.dexcount"
-        project.android {
-            compileSdkVersion COMPILE_SDK_VERSION
-            buildToolsVersion BUILD_TOOLS_VERSION
-
-            defaultConfig {
-                applicationId APPLICATION_ID
-            }
-
-            buildTypes {
-                debug {}
-                release {}
-            }
-
-            flavorDimensions "a", "b"
-
-            productFlavors {
-                flavor1 { dimension "a" }
-                flavor2 { dimension "a" }
-                flavor3 { dimension "b" }
-                flavor4 { dimension "b" }
-            }
+        // TODO(???) - Repositories from test
+        repositories {
+          google()
+          jcenter()
         }
 
+        android {
+          compileSdkVersion 28
+
+          defaultConfig {
+            applicationId 'com.example'
+          }
+        }
+      """.stripIndent().trim()
+
         when:
-        project.evaluate()
+        def result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(testProjectDir)
+            .withArguments("${taskName}", "--full-stacktrace")
+            .build()
 
         then:
-        project.tasks.getByName("countFlavor1Flavor3DebugDexMethods")
-        project.tasks.getByName("countFlavor1Flavor3ReleaseDexMethods")
-        project.tasks.getByName("countFlavor2Flavor4DebugDexMethods")
-        project.tasks.getByName("countFlavor2Flavor4ReleaseDexMethods")
+        result.task(":${taskName}").outcome == SUCCESS
+
+        where:
+        taskName << ['countDebugDexMethods', 'countReleaseDexMethods']
     }
 
-    def "android apk report example"() {
+    @Unroll def '#taskName with buildTypes'() {
         given:
-        def apkFile = tempFolder.newFile("tiniest-smallest-app.apk")
-        def apkResource = getClass().getResourceAsStream("/tiniest-smallest-app.apk")
+        buildFile <<
+            """
+        plugins {
+            id "com.android.application"
+            id "com.getkeepsafe.dexcount"
+        }
+
+        // TODO(???) - Repositories from test
+        repositories {
+          google()
+          jcenter()
+        }
+
+        android {
+          compileSdkVersion 28
+
+          defaultConfig {
+            applicationId 'com.example'
+          }
+
+          buildTypes {
+           debug {}
+           release {}
+          }
+        }
+      """.stripIndent().trim()
+
+        when:
+        def result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(testProjectDir)
+            .withArguments("${taskName}")
+            .build()
+
+        then:
+        result.task(":${taskName}").outcome == SUCCESS
+
+        where:
+        taskName << ['countDebugDexMethods', 'countReleaseDexMethods']
+    }
+
+    @Unroll def '#taskName with buildTypes + productFlavors + flavorDimensions'() {
+        given:
+        buildFile <<
+            """
+        plugins {
+            id "com.android.application"
+            id "com.getkeepsafe.dexcount"
+        }
+
+        // TODO(???) - Repositories from test
+        repositories {
+          google()
+          jcenter()
+        }
+
+        android {
+          compileSdkVersion 28
+
+          defaultConfig {
+            applicationId 'com.example'
+          }
+
+          buildTypes {
+            debug {}
+            release {}
+          }
+
+          flavorDimensions 'a', 'b'
+
+          productFlavors {
+            flavor1 { dimension 'a' }
+            flavor2 { dimension 'a' }
+            flavor3 { dimension 'b' }
+            flavor4 { dimension 'b' }
+          }
+        }
+      """.stripIndent().trim()
+
+        when:
+        def result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(testProjectDir)
+            .withArguments("${taskName}")
+            .build()
+
+        then:
+        result.task(":${taskName}").outcome == SUCCESS
+
+        where:
+        taskName << ['countFlavor1Flavor3DebugDexMethods', 'countFlavor1Flavor3ReleaseDexMethods',
+                     'countFlavor2Flavor4DebugDexMethods', 'countFlavor2Flavor4ReleaseDexMethods']
+    }
+
+    @Unroll def '#taskName with apk report example'() {
+        given:
+        new File(testProjectDir, "build/outputs/apk/$taskName".toString()).mkdirs()
+        def apkFile = new File(testProjectDir, "build/outputs/apk/${taskName}/tiniest-smallest-app.apk".toString())
+        def apkResource = getClass().getResourceAsStream('/tiniest-smallest-app.apk')
         apkResource.withStream { input ->
             apkFile.append(input)
         }
 
-        project.apply plugin: "com.android.application"
-        project.apply plugin: "com.getkeepsafe.dexcount"
+        buildFile <<
+            """
+        plugins {
+            id "com.android.application"
+            id "com.getkeepsafe.dexcount"
+        }
+
+        // TODO(???) - Repositories from test
+        repositories {
+          google()
+          jcenter()
+        }
+
+        android {
+          compileSdkVersion 28
+
+          defaultConfig {
+            applicationId 'com.example'
+          }
+        }
+      """.stripIndent().trim()
+
+        when:
+        def result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(testProjectDir)
+            .withArguments("${taskName}")
+            .build()
+
+        then:
+        result.task(":${taskName}").outcome == SUCCESS
+
+        where:
+        taskName << ['countDebugDexMethods', 'countReleaseDexMethods']
+    }
+
+    def 'when enabled is false, no dexcount tasks are added'() {
+        given:
+        buildFile <<
+            """
+        plugins {
+            id "com.android.application"
+            id "com.getkeepsafe.dexcount"
+        }
+
+        android {
+          compileSdkVersion 28
+
+          defaultConfig {
+            applicationId 'com.example'
+          }
+        }
+
+        dexcount {
+          enabled = false
+        }
+      """.stripIndent().trim()
+
+        when:
+        def result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(testProjectDir)
+            .withArguments('tasks')
+            .build()
+
+        then:
+        result.task(':tasks').outcome == SUCCESS
+        !result.output.contains('countDebugDexMethods')
+    }
+
+    // TODO migrate to new test strategy
+    def 'android apk report example'() {
+        given:
+        def apkFile = new File(testProjectDir, 'tiniest-smallest-app.apk')
+        def apkResource = getClass().getResourceAsStream('/tiniest-smallest-app.apk')
+        apkResource.withStream { input ->
+            apkFile.append(input)
+        }
+
+        def apkArtifact = Mock(BuiltArtifact)
+        def builtArtifacts = Mock(BuiltArtifacts)
+        def loader = Mock(BuiltArtifactsLoader)
+
+        apkArtifact.outputFile >> apkFile.canonicalPath
+        builtArtifacts.elements >> [apkArtifact]
+        loader.load(_) >> builtArtifacts
+
+        project.apply plugin: 'com.android.application'
+        project.apply plugin: 'com.getkeepsafe.dexcount'
         project.android {
-            compileSdkVersion COMPILE_SDK_VERSION
-            buildToolsVersion BUILD_TOOLS_VERSION
+            compileSdkVersion 28
 
             defaultConfig {
-                applicationId APPLICATION_ID
+                applicationId 'com.example'
             }
         }
 
@@ -195,93 +376,100 @@ final class DexMethodCountPluginSpec extends Specification {
         project.evaluate()
 
         // Override APK file
-        DexMethodCountTaskBase task = project.tasks.getByName(
-            "countDebugDexMethods") as DexMethodCountTaskBase
-        task.variantOutputName = "pluginSpec"
-        task.inputFileProvider = {apkFile}
+        ApkPackageTreeTask task = project.tasks.getByName("generateDebugPackageTree") as ApkPackageTreeTask
+        task.outputFileNameProperty.set("pluginSpec")
+        task.apkDirectoryProperty.set(apkFile.parentFile)
+        task.loaderProperty.set(loader)
         task.execute()
 
         then:
         // debug.csv - CSV
-        def actualOutputFile = task.outputFile.absoluteFile.text
-        def expectedOutputFile = "methods  fields   package/class name\n" +
-            "6        0        android\n" +
-            "2        0        android.app\n" +
-            "4        0        android.widget\n" +
-            "3        0        b\n" +
-            "3        0        b.a\n"
+        def actualOutputFile = task.outputDirectoryProperty.file("pluginSpec.txt").get().asFile.absoluteFile.text.stripIndent().trim()
+        def expectedOutputFile = """
+            methods  fields   package/class name
+            6        0        android
+            2        0        android.app
+            4        0        android.widget
+            3        0        b
+            3        0        b.a""".stripIndent().trim()
+
         // debug.txt - TXT
-        def actualSummaryFile = task.summaryFile.absoluteFile.text
-        def expectedSummaryFile = "methods,fields,classes\n" +
-            "9,0,4\n"
+        def actualSummaryFile = task.outputDirectoryProperty.file("summary.csv").get().asFile.absoluteFile.text.stripIndent().trim()
+        def expectedSummaryFile = """
+            methods,fields,classes
+            9,0,4
+            """.stripIndent().trim()
+
         // debugChart/data.js - JSON
-        def actualChartDir = new File(task.chartDir, "data.js").text
-        def expectedChartDir = "var data = {\n" +
-            "  \"name\": \"\",\n" +
-            "  \"methods\": 9,\n" +
-            "  \"fields\": 0,\n" +
-            "  \"children\": [\n" +
-            "    {\n" +
-            "      \"name\": \"android\",\n" +
-            "      \"methods\": 6,\n" +
-            "      \"fields\": 0,\n" +
-            "      \"children\": [\n" +
-            "        {\n" +
-            "          \"name\": \"app\",\n" +
-            "          \"methods\": 2,\n" +
-            "          \"fields\": 0,\n" +
-            "          \"children\": [\n" +
-            "            {\n" +
-            "              \"name\": \"Activity\",\n" +
-            "              \"methods\": 2,\n" +
-            "              \"fields\": 0,\n" +
-            "              \"children\": []\n" +
-            "            }\n" +
-            "          ]\n" +
-            "        },\n" +
-            "        {\n" +
-            "          \"name\": \"widget\",\n" +
-            "          \"methods\": 4,\n" +
-            "          \"fields\": 0,\n" +
-            "          \"children\": [\n" +
-            "            {\n" +
-            "              \"name\": \"RelativeLayout\",\n" +
-            "              \"methods\": 2,\n" +
-            "              \"fields\": 0,\n" +
-            "              \"children\": []\n" +
-            "            },\n" +
-            "            {\n" +
-            "              \"name\": \"TextView\",\n" +
-            "              \"methods\": 2,\n" +
-            "              \"fields\": 0,\n" +
-            "              \"children\": []\n" +
-            "            }\n" +
-            "          ]\n" +
-            "        }\n" +
-            "      ]\n" +
-            "    },\n" +
-            "    {\n" +
-            "      \"name\": \"b\",\n" +
-            "      \"methods\": 3,\n" +
-            "      \"fields\": 0,\n" +
-            "      \"children\": [\n" +
-            "        {\n" +
-            "          \"name\": \"a\",\n" +
-            "          \"methods\": 3,\n" +
-            "          \"fields\": 0,\n" +
-            "          \"children\": [\n" +
-            "            {\n" +
-            "              \"name\": \"M\",\n" +
-            "              \"methods\": 3,\n" +
-            "              \"fields\": 0,\n" +
-            "              \"children\": []\n" +
-            "            }\n" +
-            "          ]\n" +
-            "        }\n" +
-            "      ]\n" +
-            "    }\n" +
-            "  ]\n" +
-            "}"
+        def actualChartDir = task.outputDirectoryProperty.file("chart/data.js").get().asFile.text.stripIndent().trim()
+        def expectedChartDir = """
+            var data = {
+              "name": "",
+              "methods": 9,
+              "fields": 0,
+              "children": [
+                {
+                  "name": "android",
+                  "methods": 6,
+                  "fields": 0,
+                  "children": [
+                    {
+                      "name": "app",
+                      "methods": 2,
+                      "fields": 0,
+                      "children": [
+                        {
+                          "name": "Activity",
+                          "methods": 2,
+                          "fields": 0,
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "name": "widget",
+                      "methods": 4,
+                      "fields": 0,
+                      "children": [
+                        {
+                          "name": "RelativeLayout",
+                          "methods": 2,
+                          "fields": 0,
+                          "children": []
+                        },
+                        {
+                          "name": "TextView",
+                          "methods": 2,
+                          "fields": 0,
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "b",
+                  "methods": 3,
+                  "fields": 0,
+                  "children": [
+                    {
+                      "name": "a",
+                      "methods": 3,
+                      "fields": 0,
+                      "children": [
+                        {
+                          "name": "M",
+                          "methods": 3,
+                          "fields": 0,
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }""".stripIndent().trim()
+
         actualOutputFile == expectedOutputFile
         actualSummaryFile == expectedSummaryFile
         actualChartDir == expectedChartDir

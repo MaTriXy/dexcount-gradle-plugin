@@ -5,3 +5,8 @@ build/
 *.log
 local.properties
 out/
+.cxx/
+*.hprof
+build-cache/
+tmp/
+site/

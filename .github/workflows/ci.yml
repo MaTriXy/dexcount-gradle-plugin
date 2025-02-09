@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        jdk:
+          - 17
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import snapshot GPG key
+        run: |
+          echo "$GPG_SIGNING_KEY_PW" | gpg --batch --import --yes --passphrase-fd 0 <(echo -n "$GPG_SIGNING_KEY" | base64 --decode)
+          mkdir -p ~/.gradle
+          echo -n "signing.gnupg.passphrase=${GPG_SIGNING_KEY_PW}" >> ~/.gradle/gradle.properties
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_SIGNING_KEY_PW: ${{ secrets.GPG_SIGNING_KEY_PW }}
+        if: >-
+          github.repository == 'KeepSafe/dexcount-gradle-plugin' && github.ref == 'refs/heads/master'
+
+      - name: Import random GPG key
+        run: |
+          gpg --batch --gen-key <(cat <<EOF
+            Key-Type: 1
+            Key-Length: 2048
+            Key-Usage: sign
+            Passphrase: foobar
+            Name-Real: Dexcount Developers
+            Name-Email: foo@bar.com
+            Expire-Date: seconds=1200
+            %commit
+          EOF
+          )
+          mkdir -p ~/.gradle
+          echo -n "signing.gnupg.passphrase=foobar" >> ~/.gradle/gradle.properties
+        if: >-
+          github.repository != 'KeepSafe/dexcount-gradle-plugin' ||
+          github.ref != 'refs/heads/master'
+
+      - name: Set up JDK ${{ matrix.jdk }}
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ matrix.jdk }}
+          distribution: 'zulu'
+
+      - name: Cache Gradle
+        uses: gradle/gradle-build-action@v2
+
+      - name: Build and test
+        run: ./gradlew check
+
+      - name: Deploy snapshot
+        run:  ./gradlew uploadSnapshot
+        if: >-
+          github.event_name == 'push' &&
+          github.repository == 'KeepSafe/dexcount-gradle-plugin' &&
+          github.ref == 'refs/heads/master'
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}

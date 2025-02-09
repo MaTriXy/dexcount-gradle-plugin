@@ -1,0 +1,154 @@
+/*
+ * Copyright (C) 2015-2021 KeepSafe Software
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.getkeepsafe.dexcount.plugin;
+
+import com.android.build.api.artifact.Artifacts;
+import com.android.build.api.artifact.SingleArtifact;
+import com.android.build.api.dsl.CommonExtension;
+import com.android.build.api.variant.ApplicationAndroidComponentsExtension;
+import com.android.build.api.variant.LibraryAndroidComponentsExtension;
+import com.android.build.api.variant.TestAndroidComponentsExtension;
+import com.android.build.gradle.AppPlugin;
+import com.android.build.gradle.LibraryPlugin;
+import com.android.build.gradle.TestPlugin;
+import com.android.repository.Revision;
+import com.getkeepsafe.dexcount.DexCountExtension;
+import com.getkeepsafe.dexcount.StringUtils;
+import com.getkeepsafe.dexcount.treegen.ApkPackageTreeTask;
+import com.getkeepsafe.dexcount.treegen.BundlePackageTreeTask;
+import com.getkeepsafe.dexcount.treegen.LibraryPackageTreeTask;
+import com.getkeepsafe.dexcount.treegen.AndroidGeneratePackageTreeTask;
+import org.gradle.api.Project;
+import org.gradle.api.file.Directory;
+import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.file.RegularFile;
+import org.gradle.api.provider.Provider;
+
+class SevenOhApplicator extends AbstractTaskApplicator {
+    static class Factory implements TaskApplicator.Factory {
+        @Override
+        public Revision getMinimumRevision() {
+            return new Revision(7, 0);
+        }
+
+        @Override
+        public TaskApplicator create(Project project, DexCountExtension ext) {
+            return new SevenOhApplicator(project, ext);
+        }
+    }
+
+    SevenOhApplicator(Project project, DexCountExtension ext) {
+        super(project, ext);
+    }
+
+    @Override
+    public void apply() {
+        if (!getExt().getEnabled().get()) {
+            return;
+        }
+
+        getPlugins().withType(AppPlugin.class).configureEach(plugin -> {
+            var components = getExtensions().getByType(ApplicationAndroidComponentsExtension.class);
+            components.onVariants(components.selector(), variant -> {
+                registerApkTask(variant.getName(), variant.getArtifacts());
+                registerAabTask(variant.getName(), variant.getArtifacts());
+            });
+        });
+
+        getPlugins().withType(LibraryPlugin.class).configureEach(plugin -> {
+            var components = getExtensions().getByType(LibraryAndroidComponentsExtension.class);
+            components.onVariants(components.selector(), variant -> {
+                registerAarTask(variant.getName(), variant.getArtifacts());
+            });
+        });
+
+        getPlugins().withType(TestPlugin.class).configureEach(plugin -> {
+            var components = getExtensions().getByType(TestAndroidComponentsExtension.class);
+            components.onVariants(components.selector(), variant -> {
+                registerApkTask(variant.getName(), variant.getArtifacts());
+            });
+        });
+
+        getProject().afterEvaluate(project -> {
+            if (getExtensions().findByType(CommonExtension.class) == null) {
+                // No Android plugins were registered; this may be a jar-count usage.
+                registerJarTask();
+            }
+        });
+    }
+
+    private void registerApkTask(String variantName, Artifacts artifacts) {
+        if (getExt().getPrintDeclarations().get()) {
+            throw new IllegalStateException("Cannot compute declarations for project " + getProject());
+        }
+
+        String genTaskName = String.format("generate%sPackageTree", StringUtils.capitalize(variantName));
+
+        var gen = getTasks().register(genTaskName, ApkPackageTreeTask.class, t -> {
+            setCommonProperties(t, artifacts, variantName);
+
+            t.getApkDirectory().set(artifacts.get(SingleArtifact.APK.INSTANCE));
+
+        });
+
+        registerOutputTask(gen, variantName, true);
+    }
+
+    private void registerAabTask(String variantName, Artifacts artifacts) {
+        if (getExt().getPrintDeclarations().get()) {
+            throw new IllegalStateException("Cannot compute declarations for project " + getProject());
+        }
+
+        String genTaskName = String.format("generate%sBundlePackageTree", StringUtils.capitalize(variantName));
+
+        var gen = getTasks().register(genTaskName, BundlePackageTreeTask.class, t -> {
+            setCommonProperties(t, artifacts, variantName);
+
+            t.getBundleFile().set(artifacts.get(SingleArtifact.BUNDLE.INSTANCE));
+        });
+
+        registerOutputTask(gen, variantName + "Bundle", true);
+    }
+
+    private void registerAarTask(String variantName, Artifacts artifacts) {
+        String genTaskName = String.format("generate%sPackageTree", StringUtils.capitalize(variantName));
+
+        var gen = getTasks().register(genTaskName, LibraryPackageTreeTask.class, t -> {
+            setCommonProperties(t, artifacts, variantName);
+
+            t.getAarFile().set(artifacts.get(SingleArtifact.AAR.INSTANCE));
+        });
+
+        registerOutputTask(gen, variantName, true);
+    }
+
+    private <T extends AndroidGeneratePackageTreeTask<?, ?>> void setCommonProperties(T task, Artifacts artifacts, String variantName) {
+        DirectoryProperty buildDirectory = getProject().getLayout().getBuildDirectory();
+        Provider<RegularFile> packageTreeFile = buildDirectory.file("intermediates/dexcount/" + variantName + "/tree.compact.gz");
+        Provider<Directory> outputDirectory = buildDirectory.dir("outputs/dexcount/" + variantName);
+
+        task.setDescription("Generate dex method counts");
+        task.setGroup("Reporting");
+
+        task.getConfigProperty().set(getExt());
+        task.getOutputFileNameProperty().set(variantName);
+        task.getLoaderProperty().set(artifacts.getBuiltArtifactsLoader());
+        task.getMappingFileProperty().set(artifacts.get(SingleArtifact.OBFUSCATION_MAPPING_FILE.INSTANCE));
+        task.getPackageTreeFileProperty().set(packageTreeFile);
+        task.getOutputDirectoryProperty().set(outputDirectory);
+        task.getWorkerClasspath().from(getWorkerConfiguration());
+    }
+}

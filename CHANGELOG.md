@@ -1,3 +1,97 @@
+4.0.0 (16 January 2023)
+---------
+* **BREAKING** Raise minimum JDK version to 11 (#462)
+* Add support for AGP 8.0.0 alphas - and drop support for AGP versions below 7.0.0 (#491)
+* Add support for AGP 7.4.0 (#492)
+* Add support for AGP 7.3.0 (#475)
+* Add support for AGP 7.2.0 (#444)
+* Remove (broken) color console output (#432)
+
+3.1.0 (25 January 2022)
+---------
+* Add support for AGP 7.1.0
+* Add preliminary support for AGP 7.2.0 alphas
+
+3.0.1 (20 September 2021)
+---------
+* Fix plugin compatibility with Gradle 6.1.1 (#411)
+
+3.0.0 (9 August 2021)
+---------
+* **BREAKING** Port plugin from Kotlin to Java for better Gradle compatibility; public extension API changed. (#379)
+* Add support for AGP 7.0.0
+* Preliminary support for AGP 7.1.0 alphas
+
+3.0.0-RC02 (30 July 2021)
+---------
+* Fix support for AGP 4.2.0 and below (#400)
+
+3.0.0-RC01 (29 July 2021)
+---------
+* **BREAKING** Port plugin from Kotlin to Java for better Gradle compatibility; public extension API changed. (#379)
+* Add support for AGP 7.0.0
+* Preliminary support for AGP 7.1.0 alphas
+
+2.1.0 (unreleased)
+---------
+
+2.1.0-RC01 (9 May 2021)
+---------
+* Add support for AGP 4.2.0
+
+2.0.0 (15 October 2020)
+---------
+* **BREAKING** Raise minimum Gradle version to 6.0
+* **BREAKING** Raise minimum AGP version to 3.4.0
+* **BREAKING** Raise minimum JDK version to 1.8
+* **BREAKING** On AGP 4.1.0 and above, Dexcount tasks do not run automatically during a build and must be manually executed.
+* **BREAKING** Dexcount output layout on disk has changed; all output files now go in a directory named `build/outputs/dexcount/$variant/`, where `$variant` is the name of the variant whose output was analyzed.
+* Added support for AGP 4.1.0 (#305)
+* Added support for counting AAB files, AGP 4.1.0+ only (#309)
+* Fix: Crash in Android Studio 4.0.1 (#353)
+* Fix: JvmStatic methods on Kotlin interface companion objects, in AARs (#311)
+* Fix: Properly publish Gradle Plugin DSL marker artifact (#333)
+
+1.0.3
+---------
+* Fix: AGP 4.1 bugfixes (#300)
+* Fix: Don't use getProject() in DexCountTask (#297)
+
+1.0.2
+---------
+* Fix: don't use Gradle APIs introduced after 5.1 (#293)
+
+1.0.1
+---------
+* Fix counting of renamed APKs (#292)
+
+1.0.0
+---------
+* **BREAKING** Drop support for AGP 2.x
+* **BREAKING** Require Gradle 5.1 or later
+* **BREAKING** Renamed DexMethodCountTask to DexCountTask
+* **BREAKING** Changed task input types to Gradle Properties
+* Added support for counting regular java modules (#271) (thanks, @vRallev)
+* Added support for AGP 3.6 (#275)
+* Fix: support magic dex version v039
+
+0.8.6 (released 5 February 2018)
+---------
+* Fix more deprecated-API usage (#264)
+
+0.8.5 (released 2 January 2018)
+---------
+* Don't use deprecated Variant methods in AGP 3.3+ (#261)
+
+0.8.4 (released 2 October 2018)
+---------
+* Add `enabled` configuration flag (#255)
+* Enable TeamCity by default when running on TeamCity (#252)
+
+0.8.3 (released 19 June 2018)
+---------
+* Update dexdeps to handle .dex format version 038 (#248)
+
 0.8.2 (released 30 November 2017)
 ---------
 * Remove ported SdkResolver (#232)
